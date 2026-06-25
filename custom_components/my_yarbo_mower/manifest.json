@@ -1,0 +1,10 @@
+{
+  "domain": "my_yarbo_mower",
+  "name": "My Yarbo Mower",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/YarboInc/YarboDataSDK",
+  "iot_class": "cloud_push",
+  "requirements": ["yarbo-data-sdk>=0.2.1"],
+  "version": "0.1.0"
+}

@@ -1,0 +1,42 @@
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local tooling
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Home Assistant runtime/local state
+.storage/
+backups/
+deps/
+tts/
+media/
+www/
+home-assistant_v2.db*
+home-assistant.log*
+secrets.yaml
+known_devices.yaml
+automations.yaml
+scripts.yaml
+scenes.yaml
+configuration.yaml
+!examples/
+!examples/configuration.yaml
+
+# Legacy/reference files intentionally not part of this standalone app
+packages_yarbo_cadence_eq.yaml
+custom_components/yarbo/

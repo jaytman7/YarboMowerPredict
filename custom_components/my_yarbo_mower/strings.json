@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "My Yarbo Mower",
+        "description": "Connect directly to your Yarbo account for the standalone mower app.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "select_devices": {
+        "title": "Select Yarbo",
+        "data": {
+          "selected_devices": "Devices"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to Yarbo.",
+      "invalid_auth": "Invalid Yarbo credentials.",
+      "no_devices_selected": "Select at least one device."
+    },
+    "abort": {
+      "already_configured": "This Yarbo account is already configured."
+    }
+  }
+}

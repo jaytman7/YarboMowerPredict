@@ -1,0 +1,263 @@
+title: My Yarbo Mower
+views:
+  - title: Mower
+    path: mower
+    icon: mdi:robot-mower
+    badges: []
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: >
+              {% set activity = states('lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower') %}
+              {% set plan = states('sensor.my_yarbo_25070102ovpie639_my_yarbo_next_run_plan') %}
+              # My Yarbo
+              **{{ activity | replace('_',' ') | title if activity not in ['unknown','unavailable'] else 'Waiting for Yarbo data' }}**
+              · Next: {{ plan if plan not in ['unknown','unavailable','None',''] else 'No plan selected' }}
+
+          - type: horizontal-stack
+            cards:
+              - type: gauge
+                entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_battery
+                name: Battery
+                min: 0
+                max: 100
+                needle: true
+                severity:
+                  red: 0
+                  yellow: 35
+                  green: 70
+              - type: gauge
+                entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_mowing_conditions
+                name: Mowing
+                min: 0
+                max: 100
+                needle: true
+                severity:
+                  red: 0
+                  yellow: 45
+                  green: 70
+              - type: gauge
+                entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_grass_wetness
+                name: Wetness
+                min: 0
+                max: 100
+                needle: true
+                severity:
+                  green: 0
+                  yellow: 45
+                  red: 70
+
+          - type: entities
+            title: Mission
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+                name: Mower
+              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_plan
+                name: Plan
+              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_power_state
+                name: Power state
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_plan_start_percent
+                name: Start percent
+
+          - type: entities
+            title: Plan Sequence
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence
+                name: Sequence
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_previous_completed_plan
+                name: Previous completed
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_next_run_plan
+                name: Next run
+              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_sequence_plan
+                name: Sequence plan
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_add_sequence_plan
+                name: Add sequence plan
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_remove_sequence_plan
+                name: Remove sequence plan
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_clear_sequence
+                name: Clear sequence
+
+          - type: markdown
+            content: |
+              {% set sequence = state_attr('sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence', 'plans') or [] %}
+              {% set current = state_attr('sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence', 'sequence_index') | int(0) %}
+              **Previous:** {{ states('sensor.my_yarbo_25070102ovpie639_my_yarbo_previous_completed_plan') }}
+              **Next:** {{ states('sensor.my_yarbo_25070102ovpie639_my_yarbo_next_run_plan') }}
+
+              {% if sequence | length > 0 %}
+              {% for plan in sequence %}
+              {% if loop.index0 == current %}- next: {{ plan }}{% else %}- {{ plan }}{% endif %}
+              {% endfor %}
+              {% else %}
+              Sequence is empty.
+              {% endif %}
+
+          - type: grid
+            columns: 4
+            square: false
+            cards:
+              - type: button
+                entity: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+                name: Start
+                icon: mdi:play
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: lawn_mower.start_mowing
+                  target:
+                    entity_id: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+              - type: button
+                entity: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+                name: Pause
+                icon: mdi:pause
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: lawn_mower.pause
+                  target:
+                    entity_id: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+              - type: button
+                entity: button.my_yarbo_25070102ovpie639_my_yarbo_resume
+                name: Resume
+                icon: mdi:play-pause
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.my_yarbo_25070102ovpie639_my_yarbo_resume
+              - type: button
+                entity: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+                name: Dock
+                icon: mdi:home-import-outline
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: lawn_mower.dock
+                  target:
+                    entity_id: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+
+          - type: grid
+            columns: 4
+            square: false
+            cards:
+              - type: button
+                entity: button.my_yarbo_25070102ovpie639_my_yarbo_start_plan
+                name: Start Plan
+                icon: mdi:playlist-play
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.my_yarbo_25070102ovpie639_my_yarbo_start_plan
+              - type: button
+                entity: button.my_yarbo_25070102ovpie639_my_yarbo_stop
+                name: Stop
+                icon: mdi:stop
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.my_yarbo_25070102ovpie639_my_yarbo_stop
+              - type: button
+                entity: button.my_yarbo_25070102ovpie639_my_yarbo_wake
+                name: Wake
+                icon: mdi:power
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.my_yarbo_25070102ovpie639_my_yarbo_wake
+              - type: button
+                entity: button.my_yarbo_25070102ovpie639_my_yarbo_refresh
+                name: Refresh
+                icon: mdi:refresh
+                show_state: false
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.my_yarbo_25070102ovpie639_my_yarbo_refresh
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Status
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: binary_sensor.my_yarbo_25070102ovpie639_my_yarbo_online
+                name: Online
+              - entity: binary_sensor.my_yarbo_25070102ovpie639_my_yarbo_charging
+                name: Charging
+              - entity: binary_sensor.my_yarbo_25070102ovpie639_my_yarbo_paused
+                name: Paused
+              - entity: binary_sensor.my_yarbo_25070102ovpie639_my_yarbo_obstacle
+                name: Obstacle
+              - entity: binary_sensor.my_yarbo_25070102ovpie639_my_yarbo_stuck
+                name: Stuck
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_status
+                name: Plan status
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_recharge_status
+                name: Recharge status
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_rtk_signal
+                name: RTK signal
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_gps_satellites
+                name: GPS satellites
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_error_code
+                name: Error code
+
+          - type: entities
+            title: Conditions
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_mowing_conditions
+                name: Favorability
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_grass_wetness
+                name: Grass wetness
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_after_sunrise_blackout
+                name: After sunrise blackout
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_before_sunset_blackout
+                name: Before sunset blackout
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_charging_power
+                name: Charging power
+
+          - type: entities
+            title: Deck
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_head_type
+                name: Head
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_blade_height
+                name: Blade height
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_blade_speed
+                name: Blade speed
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_rain_sensor
+                name: Rain sensor
+
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Direct SDK Controls
+            show_header_toggle: false
+            entities:
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_refresh_plans
+                name: Refresh plans
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_dock
+                name: Dock button
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_pause
+                name: Pause button
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_resume
+                name: Resume button
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_stop
+                name: Stop button

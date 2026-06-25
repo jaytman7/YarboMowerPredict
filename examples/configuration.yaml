@@ -1,0 +1,12 @@
+# Add this to your Home Assistant configuration.yaml if you want to load the
+# included dashboard from a YAML file.
+
+lovelace:
+  mode: storage
+  dashboards:
+    yarbo-mower-app:
+      mode: yaml
+      title: My Yarbo Mower
+      icon: mdi:robot-mower
+      show_in_sidebar: true
+      filename: yarbo_mower_app-dashboard.yaml
