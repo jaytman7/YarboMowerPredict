@@ -49,56 +49,27 @@ views:
                   red: 70
 
           - type: entities
-            title: Mission
+            title: Conditions
             show_header_toggle: false
             state_color: true
             entities:
-              - entity: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
-                name: Mower
-              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_plan
-                name: Plan
-              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_power_state
-                name: Power state
-              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_plan_start_percent
-                name: Start percent
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_mowing_conditions
+                name: Favorability
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_grass_wetness
+                name: Grass wetness
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_weather_window
+                name: Next 3 hours
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_best_mow_start
+                name: Best start
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_after_sunrise_blackout
+                name: After sunrise blackout
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_before_sunset_blackout
+                name: Before sunset blackout
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_charging_power
+                name: Charging power
 
-          - type: entities
-            title: Plan Sequence
-            show_header_toggle: false
-            state_color: true
-            entities:
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence
-                name: Sequence
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_previous_completed_plan
-                name: Previous completed
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_next_run_plan
-                name: Next run
-              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_sequence_plan
-                name: Sequence plan
-              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_add_sequence_plan
-                name: Add sequence plan
-              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_remove_sequence_plan
-                name: Remove sequence plan
-              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_clear_sequence
-                name: Clear sequence
-
-          - type: markdown
-            content: |
-              {% set sequence = state_attr('sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence', 'plans') or [] %}
-              {% set current = state_attr('sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence', 'sequence_index') | int(0) %}
-              **Previous:** {{ states('sensor.my_yarbo_25070102ovpie639_my_yarbo_previous_completed_plan') }}
-              **Next:** {{ states('sensor.my_yarbo_25070102ovpie639_my_yarbo_next_run_plan') }}
-
-              {% if sequence | length > 0 %}
-              {% for plan in sequence %}
-              {% set growth = plan.growth_since_last_mow_in %}
-              {% set days = plan.growth_days %}
-              {% if loop.index0 == current %}- next: {{ plan.name }} · {{ growth }} in{% else %}- {{ plan.name }} · {{ growth }} in{% endif %}{% if days not in [none, ''] %} · {{ days }} d{% endif %}
-              {% endfor %}
-              {% else %}
-              Sequence is empty.
-              {% endif %}
-
+      - type: vertical-stack
+        cards:
           - type: grid
             columns: 4
             square: false
@@ -189,6 +160,57 @@ views:
                   target:
                     entity_id: button.my_yarbo_25070102ovpie639_my_yarbo_refresh
 
+          - type: entities
+            title: Mission
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: lawn_mower.my_yarbo_25070102ovpie639_my_yarbo_mower
+                name: Mower
+              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_plan
+                name: Plan
+              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_power_state
+                name: Power state
+              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_plan_start_percent
+                name: Start percent
+
+          - type: entities
+            title: Plan Sequence
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence
+                name: Sequence
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_previous_completed_plan
+                name: Previous completed
+              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_next_run_plan
+                name: Next run
+              - entity: select.my_yarbo_25070102ovpie639_my_yarbo_sequence_plan
+                name: Sequence plan
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_add_sequence_plan
+                name: Add sequence plan
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_remove_sequence_plan
+                name: Remove sequence plan
+              - entity: button.my_yarbo_25070102ovpie639_my_yarbo_clear_sequence
+                name: Clear sequence
+
+          - type: markdown
+            content: |
+              {% set sequence = state_attr('sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence', 'plans') or [] %}
+              {% set current = state_attr('sensor.my_yarbo_25070102ovpie639_my_yarbo_plan_sequence', 'sequence_index') | int(0) %}
+              **Previous:** {{ states('sensor.my_yarbo_25070102ovpie639_my_yarbo_previous_completed_plan') }}
+              **Next:** {{ states('sensor.my_yarbo_25070102ovpie639_my_yarbo_next_run_plan') }}
+
+              {% if sequence | length > 0 %}
+              {% for plan in sequence %}
+              {% set growth = plan.growth_since_last_mow_in %}
+              {% set days = plan.growth_days %}
+              {% if loop.index0 == current %}- next: {{ plan.name }} · {{ growth }} in{% else %}- {{ plan.name }} · {{ growth }} in{% endif %}{% if days not in [none, ''] %} · {{ days }} d{% endif %}
+              {% endfor %}
+              {% else %}
+              Sequence is empty.
+              {% endif %}
+
       - type: vertical-stack
         cards:
           - type: entities
@@ -218,26 +240,6 @@ views:
                 name: Error code
 
           - type: entities
-            title: Conditions
-            show_header_toggle: false
-            state_color: true
-            entities:
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_mowing_conditions
-                name: Favorability
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_grass_wetness
-                name: Grass wetness
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_weather_window
-                name: Next 3 hours
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_best_mow_start
-                name: Best start
-              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_after_sunrise_blackout
-                name: After sunrise blackout
-              - entity: number.my_yarbo_25070102ovpie639_my_yarbo_before_sunset_blackout
-                name: Before sunset blackout
-              - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_charging_power
-                name: Charging power
-
-          - type: entities
             title: Deck
             show_header_toggle: false
             state_color: true
@@ -251,8 +253,6 @@ views:
               - entity: sensor.my_yarbo_25070102ovpie639_my_yarbo_rain_sensor
                 name: Rain sensor
 
-      - type: vertical-stack
-        cards:
           - type: entities
             title: Direct SDK Controls
             show_header_toggle: false
