@@ -13,6 +13,7 @@ This project is separate from the existing YarboHA integration.
 - Per-plan grass growth estimates attached to the sequence list.
 - Sensors for previous completed plan, next run plan, current sequence position, battery, RTK, recharge status, charging power, mower head, rain sensor, and errors.
 - Weather and sun-derived mowing condition and grass wetness scores.
+- Three-hour weather lookahead that blocks starting when bad weather is expected.
 - Configurable blackout windows after sunrise and before sunset.
 - YAML dashboard at `yarbo_mower_app-dashboard.yaml`.
 
@@ -56,6 +57,12 @@ Each known plan gets a local growth counter. The `Plan Sequence` sensor exposes 
 - `last_mowed_at`
 
 The app estimates growth from current weather, temperature, cloud cover, humidity, and sun state. When a plan started by this app completes, that plan's growth counter resets to `0.0` and its `last_mowed_at` timestamp is updated.
+
+## Weather Start Gate
+
+The app checks Home Assistant's hourly weather forecast for the next three hours. Starting is blocked when the current weather or lookahead window contains rain, storms, snow/hail, measurable precipitation, high precipitation probability, or high wind.
+
+The `Weather Window` sensor exposes the current decision, reason, checked timestamp, forecast horizon, and the forecast entries considered by the gate.
 
 ## Notes
 

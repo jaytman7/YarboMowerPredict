@@ -46,9 +46,15 @@ GROWTH_MAX_CATCHUP_HOURS = 24.0
 GROWTH_MAX_DAILY_INCHES = 0.16
 GROWTH_OPTIMAL_TEMP_F = 68.0
 GROWTH_TEMP_SPREAD_F = 18.0
+WEATHER_LOOKAHEAD_HOURS = 3
+WEATHER_LOOKAHEAD_UPDATE_INTERVAL = timedelta(minutes=15)
+WEATHER_LOOKAHEAD_PRECIP_PROBABILITY = 35.0
+WEATHER_LOOKAHEAD_PRECIP_AMOUNT = 0.01
+WEATHER_LOOKAHEAD_WIND_SPEED = 25.0
 WEATHER_ENTITY = "weather.forecast_home"
 SUN_ENTITY = "sun.sun"
 WET_WEATHER = {"rainy", "pouring", "lightning-rainy", "snowy-rainy", "snowy", "hail"}
+START_BLOCK_WEATHER = WET_WEATHER | {"lightning", "exceptional"}
 BAD_GROWTH_WEATHER = {"lightning", "exceptional", "hail", "snowy", "snowy-rainy"}
 
 
@@ -108,6 +114,12 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.plan_growth_started_at: dict[str, dict[str, str]] = {}
         self.plan_last_mowed_at: dict[str, dict[str, str]] = {}
         self._last_growth_update: dict[str, str] = {}
+        self.weather_lookahead: dict[str, Any] = {
+            "status": "unknown",
+            "blocked": False,
+            "reason": "not checked",
+            "horizon_hours": WEATHER_LOOKAHEAD_HOURS,
+        }
         self._last_planning_state: dict[str, int | None] = {}
         self._sequence_store = Store(
             hass, SEQUENCE_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_sequence"
@@ -115,6 +127,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._last_heartbeat: dict[str, float] = {}
         self._unsub_heartbeat_check: CALLBACK_TYPE | None = None
         self._unsub_growth_update: CALLBACK_TYPE | None = None
+        self._unsub_weather_lookahead: CALLBACK_TYPE | None = None
 
     async def async_setup(self) -> None:
         """Create SDK client, authenticate, subscribe, and fetch initial data."""
@@ -188,11 +201,21 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._unsub_growth_update = async_track_time_interval(
             self.hass, self._async_update_plan_growth, GROWTH_UPDATE_INTERVAL
         )
+        self._unsub_weather_lookahead = async_track_time_interval(
+            self.hass,
+            self._async_update_weather_lookahead,
+            WEATHER_LOOKAHEAD_UPDATE_INTERVAL,
+        )
 
         self.entry.async_create_background_task(
             self.hass,
             self._async_initial_fetch(),
             name=f"{DOMAIN}_initial_fetch",
+        )
+        self.entry.async_create_background_task(
+            self.hass,
+            self._async_update_weather_lookahead(),
+            name=f"{DOMAIN}_weather_lookahead",
         )
         self.async_set_updated_data(self.data)
 
@@ -204,6 +227,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self._unsub_growth_update:
             self._unsub_growth_update()
             self._unsub_growth_update = None
+        if self._unsub_weather_lookahead:
+            self._unsub_weather_lookahead()
+            self._unsub_weather_lookahead = None
         if self._client is not None:
             await self.hass.async_add_executor_job(self._client.close)
             self._client = None
@@ -294,6 +320,10 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_start_plan(self, sn: str) -> None:
         """Start the next queued plan, or the selected plan when no queue exists."""
+        await self._async_update_weather_lookahead()
+        if self.weather_start_blocked():
+            raise ValueError(self.weather_start_block_reason())
+
         device = self.device_by_sn(sn)
         sequence_plan = self.next_sequence_plan(sn)
         plan_name = sequence_plan or self.selected_plan_name.get(sn)
@@ -514,6 +544,15 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Return the plan used by the next start command."""
         return self.next_sequence_plan(sn) or self.selected_plan_name.get(sn)
 
+    def weather_start_blocked(self) -> bool:
+        """Return whether forecast weather should prevent starting a mow."""
+        return bool(self.weather_lookahead.get("blocked"))
+
+    def weather_start_block_reason(self) -> str:
+        """Return a user-facing forecast block reason."""
+        reason = self.weather_lookahead.get("reason") or "bad weather expected"
+        return f"Cannot start: {reason}"
+
     def plan_growth_details(
         self, sn: str, plan_names: list[str] | None = None
     ) -> list[dict[str, Any]]:
@@ -669,6 +708,208 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if changed:
             self._persist_sequence()
             self.async_set_updated_data(self.data or {})
+
+    async def _async_update_weather_lookahead(self, _now=None) -> None:
+        """Fetch and score the next weather window."""
+        lookahead = await self._async_weather_lookahead()
+        if lookahead != self.weather_lookahead:
+            self.weather_lookahead = lookahead
+            self.async_set_updated_data(self.data or {})
+
+    async def _async_weather_lookahead(self) -> dict[str, Any]:
+        weather_entity = self._weather_entity_id()
+        now = dt_util.now()
+        horizon = now + timedelta(hours=WEATHER_LOOKAHEAD_HOURS)
+        weather = self.hass.states.get(weather_entity)
+        attrs = weather.attributes if weather is not None else {}
+        current_condition = weather.state if weather is not None else None
+        current_reason = self._current_weather_block_reason(current_condition, attrs)
+
+        base: dict[str, Any] = {
+            "status": "clear",
+            "blocked": False,
+            "reason": "no bad weather expected",
+            "weather_entity": weather_entity,
+            "checked_at": now.isoformat(),
+            "horizon_hours": WEATHER_LOOKAHEAD_HOURS,
+            "horizon_until": horizon.isoformat(),
+            "current_condition": current_condition,
+            "forecast_available": False,
+            "forecast_count": 0,
+            "first_bad_weather_at": None,
+            "first_bad_weather_condition": None,
+            "forecast": [],
+        }
+
+        if current_reason is not None:
+            base.update(
+                {
+                    "status": "blocked",
+                    "blocked": True,
+                    "reason": current_reason,
+                    "first_bad_weather_at": now.isoformat(),
+                    "first_bad_weather_condition": current_condition,
+                }
+            )
+            return base
+
+        if not self.hass.services.has_service("weather", "get_forecasts"):
+            base.update(
+                {
+                    "status": "unknown",
+                    "reason": "weather forecast service unavailable",
+                }
+            )
+            return base
+
+        try:
+            response = await self.hass.services.async_call(
+                "weather",
+                "get_forecasts",
+                {"type": "hourly"},
+                blocking=True,
+                return_response=True,
+                target={"entity_id": weather_entity},
+            )
+        except Exception as err:
+            _LOGGER.debug("Weather forecast lookahead failed: %s", err)
+            base.update(
+                {
+                    "status": "unknown",
+                    "reason": f"forecast unavailable: {err}",
+                }
+            )
+            return base
+
+        forecast = self._extract_forecast(response, weather_entity)
+        considered = self._forecast_window(forecast, now, horizon)
+        base["forecast_available"] = bool(forecast)
+        base["forecast_count"] = len(considered)
+        base["forecast"] = considered
+
+        for item in considered:
+            reason = self._forecast_block_reason(item)
+            if reason is None:
+                continue
+            base.update(
+                {
+                    "status": "blocked",
+                    "blocked": True,
+                    "reason": reason,
+                    "first_bad_weather_at": item.get("datetime"),
+                    "first_bad_weather_condition": item.get("condition"),
+                }
+            )
+            return base
+
+        if not forecast:
+            base.update(
+                {
+                    "status": "unknown",
+                    "reason": "hourly forecast unavailable",
+                }
+            )
+        return base
+
+    def _extract_forecast(
+        self, response: Any, weather_entity: str
+    ) -> list[dict[str, Any]]:
+        if not isinstance(response, dict):
+            return []
+
+        entity_response = response.get(weather_entity)
+        if entity_response is None and len(response) == 1:
+            entity_response = next(iter(response.values()))
+
+        forecast = None
+        if isinstance(entity_response, dict):
+            forecast = entity_response.get("forecast")
+        elif isinstance(entity_response, list):
+            forecast = entity_response
+        elif isinstance(response.get("forecast"), list):
+            forecast = response["forecast"]
+
+        if not isinstance(forecast, list):
+            return []
+        return [item for item in forecast if isinstance(item, dict)]
+
+    def _forecast_window(
+        self,
+        forecast: list[dict[str, Any]],
+        now: datetime,
+        horizon: datetime,
+    ) -> list[dict[str, Any]]:
+        window: list[dict[str, Any]] = []
+        undated_limit = WEATHER_LOOKAHEAD_HOURS + 1
+
+        for index, item in enumerate(forecast):
+            raw_dt = item.get("datetime")
+            parsed = self._parse_datetime(raw_dt)
+            if parsed is None:
+                if index >= undated_limit:
+                    continue
+            elif parsed < now - timedelta(minutes=10) or parsed > horizon:
+                continue
+
+            window.append(
+                {
+                    "datetime": parsed.isoformat() if parsed is not None else raw_dt,
+                    "condition": item.get("condition"),
+                    "precipitation_probability": self._float_value(
+                        item.get("precipitation_probability")
+                    ),
+                    "precipitation": self._float_value(item.get("precipitation")),
+                    "wind_speed": self._float_value(item.get("wind_speed")),
+                    "temperature": self._float_value(item.get("temperature")),
+                }
+            )
+        return window
+
+    def _current_weather_block_reason(
+        self, condition: str | None, attrs: dict[str, Any]
+    ) -> str | None:
+        if condition in START_BLOCK_WEATHER:
+            return f"current weather is {condition}"
+
+        wind_speed = self._float_value(attrs.get("wind_speed"))
+        if wind_speed is not None and wind_speed >= WEATHER_LOOKAHEAD_WIND_SPEED:
+            return f"current wind is {wind_speed:g}"
+
+        return None
+
+    def _forecast_block_reason(self, item: dict[str, Any]) -> str | None:
+        when = self._forecast_time_label(item.get("datetime"))
+        condition = item.get("condition")
+        if condition in START_BLOCK_WEATHER:
+            return f"{condition} expected {when}"
+
+        probability = self._float_value(item.get("precipitation_probability"))
+        if (
+            probability is not None
+            and probability >= WEATHER_LOOKAHEAD_PRECIP_PROBABILITY
+        ):
+            return f"{probability:g}% precipitation chance {when}"
+
+        precipitation = self._float_value(item.get("precipitation"))
+        if precipitation is not None and precipitation >= WEATHER_LOOKAHEAD_PRECIP_AMOUNT:
+            return f"{precipitation:g} precipitation forecast {when}"
+
+        wind_speed = self._float_value(item.get("wind_speed"))
+        if wind_speed is not None and wind_speed >= WEATHER_LOOKAHEAD_WIND_SPEED:
+            return f"{wind_speed:g} wind forecast {when}"
+
+        return None
+
+    def _forecast_time_label(self, value: Any) -> str:
+        parsed = self._parse_datetime(value)
+        if parsed is None:
+            return "within the next 3 hours"
+        minutes = round((parsed - dt_util.now()).total_seconds() / 60)
+        if minutes <= 0:
+            return "now"
+        if minutes < 90:
+            return f"in {minutes} minutes"
+        return f"in {round(minutes / 60, 1):g} hours"
 
     def _ensure_sequence_picker(self, sn: str) -> None:
         if self.sequence_picker.get(sn) in self.plan_names(sn):

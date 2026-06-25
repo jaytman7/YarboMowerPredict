@@ -91,6 +91,7 @@ async def async_setup_entry(
         entities.append(MyYarboSequenceSensor(coordinator, device, "plan_sequence"))
         entities.append(MyYarboSequenceSensor(coordinator, device, "previous_completed_plan"))
         entities.append(MyYarboSequenceSensor(coordinator, device, "next_run_plan"))
+        entities.append(MyYarboWeatherWindowSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -195,6 +196,31 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
         if self._key == "next_run_plan":
             attrs["source"] = "sequence" if next_sequence_plan else "selected_plan"
         return attrs
+
+
+class MyYarboWeatherWindowSensor(MyYarboEntity, SensorEntity):
+    """Three-hour start weather window sensor."""
+
+    _attr_icon = "mdi:weather-partly-rainy"
+
+    def __init__(self, coordinator: MyYarboCoordinator, device) -> None:
+        super().__init__(coordinator, device, "weather_window")
+        self._attr_name = f"{APP_NAME} Weather Window"
+
+    @property
+    def native_value(self) -> str:
+        """Return whether the start weather window is safe."""
+        status = self.coordinator.weather_lookahead.get("status")
+        if status == "blocked":
+            return "Blocked"
+        if status == "clear":
+            return "Clear"
+        return "Unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return forecast lookahead details."""
+        return dict(self.coordinator.weather_lookahead)
 
 
 class MyYarboConditionSensor(MyYarboEntity, SensorEntity):

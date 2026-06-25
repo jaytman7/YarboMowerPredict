@@ -116,6 +116,8 @@ class MyYarboMower(MyYarboEntity, LawnMowerEntity):
             and self.coordinator.selected_plan.get(self._device.sn) is None
         ):
             raise HomeAssistantError("Cannot start: no plan selected")
+        if self.coordinator.weather_start_blocked():
+            raise HomeAssistantError(self.coordinator.weather_start_block_reason())
         if self._is_charging:
             raise HomeAssistantError("Cannot start: Yarbo is charging")
         recharge_state = self.int_field("BodyMsg.rechargeState")
