@@ -35,7 +35,6 @@ class MyYarboPlanSelect(MyYarboEntity, SelectEntity):
     def __init__(self, coordinator: MyYarboCoordinator, device) -> None:
         super().__init__(coordinator, device, "plan")
         self._attr_name = f"{APP_NAME} Plan"
-        self._current: str | None = None
         self._plan_id_by_name: dict[str, int | None] = {}
 
     @property
@@ -50,11 +49,11 @@ class MyYarboPlanSelect(MyYarboEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         """Return selected plan."""
-        return self._current
+        current = self.coordinator.selected_plan_name.get(self._device.sn)
+        return current if current in self.options else None
 
     async def async_select_option(self, option: str) -> None:
         """Select a plan locally."""
-        self._current = option
         self.coordinator.selected_plan[self._device.sn] = self.coordinator.plan_id_by_name(
             self._device.sn, option
         )

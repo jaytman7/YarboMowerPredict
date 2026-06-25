@@ -313,6 +313,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.plan_data[sn] = result.get("data", {}).get("data", [])
             self._ensure_sequence_picker(sn)
             self._ensure_plan_growth_entries(sn)
+            self.sync_selected_plan_to_next(sn)
             self._persist_sequence()
             self.async_set_updated_data(self.data)
         except TimeoutError:
@@ -563,6 +564,21 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Return the plan used by the next start command."""
         return self.next_sequence_plan(sn) or self.selected_plan_name.get(sn)
 
+    def sync_selected_plan_to_next(self, sn: str) -> None:
+        """Make the normal HA plan select mirror the next queued plan."""
+        next_plan = self.next_sequence_plan(sn)
+        if next_plan is None:
+            selected_name = self.selected_plan_name.get(sn)
+            if selected_name is not None:
+                self.selected_plan[sn] = self.plan_id_by_name(sn, selected_name)
+            return
+
+        plan_id = self.plan_id_by_name(sn, next_plan)
+        if plan_id is None:
+            return
+        self.selected_plan_name[sn] = next_plan
+        self.selected_plan[sn] = plan_id
+
     def weather_start_blocked(self) -> bool:
         """Return whether forecast weather should prevent starting a mow."""
         return bool(self.weather_lookahead.get("blocked"))
@@ -665,6 +681,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             raise ValueError("No Yarbo plan selected for the sequence")
         self.plan_sequence.setdefault(sn, []).append(plan_name)
         self.sequence_index[sn] = self._sequence_index_for(sn)
+        self.sync_selected_plan_to_next(sn)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
         return plan_name
@@ -689,6 +706,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         else:
             self.sequence_index[sn] = current_index % len(sequence)
 
+        self.sync_selected_plan_to_next(sn)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
         return removed
@@ -697,6 +715,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Clear the local plan sequence."""
         self.plan_sequence[sn] = []
         self.sequence_index[sn] = 0
+        self.sync_selected_plan_to_next(sn)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
 
@@ -1286,6 +1305,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 else:
                     self.sequence_index[sn] = current_index
 
+        self.sync_selected_plan_to_next(sn)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
 
