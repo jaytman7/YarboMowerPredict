@@ -16,13 +16,14 @@ This project is separate from the existing YarboHA integration.
 - Three-hour weather lookahead that blocks starting when bad weather is expected.
 - Best mow start prediction for the driest, coolest usable daylight forecast window.
 - Configurable blackout windows after sunrise and before sunset.
-- YAML dashboard at `yarbo_mower_app-dashboard.yaml`.
+- Generated YAML dashboard at `yarbo_mower_app-dashboard.yaml` using the user's actual Home Assistant entity IDs.
 
 ## Repository Layout
 
 ```text
 custom_components/my_yarbo_mower/   Home Assistant custom integration
-yarbo_mower_app-dashboard.yaml      Optional Lovelace dashboard
+custom_components/my_yarbo_mower/dashboard_template.yaml
+                                    Source template for generated dashboard
 examples/configuration.yaml         Dashboard configuration snippet
 ```
 
@@ -32,8 +33,24 @@ examples/configuration.yaml         Dashboard configuration snippet
 2. Restart Home Assistant.
 3. Add the integration from Settings, Devices and services, Add integration, `My Yarbo Mower`.
 4. Log in with your Yarbo account and select the mower device.
-5. Copy `yarbo_mower_app-dashboard.yaml` into your Home Assistant config directory if you want the included dashboard.
-6. Add the dashboard snippet from `examples/configuration.yaml` to your Home Assistant `configuration.yaml`, then restart Home Assistant.
+5. Add the dashboard snippet from `examples/configuration.yaml` to your Home Assistant `configuration.yaml`, then restart Home Assistant.
+6. The integration will generate `yarbo_mower_app-dashboard.yaml` automatically for a single selected mower when the file does not already exist. You can also press the `Generate Dashboard` button on the My Yarbo device, or call `my_yarbo_mower.generate_dashboard`, to regenerate it after renaming entities or changing devices.
+
+## Dashboard Generation
+
+The dashboard is rendered from `custom_components/my_yarbo_mower/dashboard_template.yaml`.
+It does not guess entity IDs from a Yarbo serial number. Instead, it asks Home
+Assistant's entity registry for each entity created by this integration and writes
+the resolved IDs into `yarbo_mower_app-dashboard.yaml`.
+
+If more than one Yarbo device is selected, call the service with a serial number:
+
+```yaml
+service: my_yarbo_mower.generate_dashboard
+data:
+  device_serial: YOUR_YARBO_SERIAL
+  overwrite: true
+```
 
 ## Plan Sequence Behavior
 

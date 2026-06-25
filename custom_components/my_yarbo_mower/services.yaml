@@ -1,0 +1,17 @@
+generate_dashboard:
+  name: Generate dashboard
+  description: Generate the My Yarbo Mower YAML dashboard using this Home Assistant instance's entity IDs.
+  fields:
+    device_serial:
+      name: Device serial
+      description: Yarbo serial number to generate a dashboard for. Required only when more than one My Yarbo device is loaded.
+      required: false
+      selector:
+        text:
+    overwrite:
+      name: Overwrite
+      description: Replace the existing yarbo_mower_app-dashboard.yaml file.
+      required: false
+      default: true
+      selector:
+        boolean:

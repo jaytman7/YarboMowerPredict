@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 DOMAIN = "my_yarbo_mower"
+DASHBOARD_FILENAME = "yarbo_mower_app-dashboard.yaml"
+SERVICE_GENERATE_DASHBOARD = "generate_dashboard"
+CONF_DEVICE_SERIAL = "device_serial"
+CONF_OVERWRITE = "overwrite"
 PLATFORMS = [
     "binary_sensor",
     "button",

@@ -34,6 +34,7 @@ automations.yaml
 scripts.yaml
 scenes.yaml
 configuration.yaml
+yarbo_mower_app-dashboard.yaml
 !examples/
 !examples/configuration.yaml
 

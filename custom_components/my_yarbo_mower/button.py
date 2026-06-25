@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import APP_NAME, DOMAIN
 from .coordinator import MyYarboCoordinator
+from .dashboard import async_generate_dashboard
 from .entity import MyYarboEntity
 
 
@@ -36,6 +37,7 @@ BUTTONS = [
     ButtonDef("clear_sequence", "Clear Sequence", "mdi:playlist-remove"),
     ButtonDef("refresh", "Refresh", "mdi:refresh"),
     ButtonDef("refresh_plans", "Refresh Plans", "mdi:clipboard-list"),
+    ButtonDef("generate_dashboard", "Generate Dashboard", "mdi:view-dashboard-edit"),
 ]
 
 
@@ -85,6 +87,13 @@ class MyYarboButton(MyYarboEntity, ButtonEntity):
             elif key == "refresh_plans":
                 await self.coordinator.async_refresh_plans(
                     self._device.sn, self._device.type_id
+                )
+            elif key == "generate_dashboard":
+                await async_generate_dashboard(
+                    self.hass,
+                    self.coordinator,
+                    self._device.sn,
+                    overwrite=True,
                 )
         except Exception as err:
             raise HomeAssistantError(f"Yarbo button failed: {err}") from err
