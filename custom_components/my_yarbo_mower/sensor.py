@@ -147,7 +147,9 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
             if not sequence:
                 return "Empty"
             index = self.coordinator.sequence_index.get(sn, 0) % len(sequence)
-            return f"{index + 1}/{len(sequence)}: {sequence[index]}"
+            detail = self.coordinator.plan_growth_details(sn, sequence)[index]
+            growth = detail["growth_since_last_mow_in"]
+            return f"{index + 1}/{len(sequence)}: {sequence[index]} ({growth:.2f} in)"
         if self._key == "previous_completed_plan":
             return self.coordinator.previous_completed_plan.get(sn) or UNKNOWN_PLAN
         return self.coordinator.next_run_plan(sn) or UNKNOWN_PLAN
@@ -157,21 +159,39 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
         """Return queue details for dashboard display."""
         sn = self._device.sn
         sequence = list(self.coordinator.plan_sequence.get(sn, []))
+        sequence_details = self.coordinator.plan_growth_details(sn, sequence)
         next_sequence_plan = self.coordinator.next_sequence_plan(sn)
         selected_plan = self.coordinator.selected_plan_name.get(sn)
+        next_plan = self.coordinator.next_run_plan(sn)
+        growth_metrics = self.coordinator.growth_weather_metrics()
+        next_detail = (
+            self.coordinator.plan_growth_details(sn, [next_plan])[0]
+            if next_plan
+            else None
+        )
         attrs: dict[str, Any] = {
-            "plans": sequence,
+            "plans": sequence_details,
+            "plan_names": sequence,
+            "all_plans": self.coordinator.plan_growth_details(sn),
             "plan_count": len(sequence),
             "sequence_index": self.coordinator.sequence_index.get(sn, 0)
             if sequence
             else None,
             "next_sequence_plan": next_sequence_plan,
             "selected_plan": selected_plan,
-            "next_run_plan": self.coordinator.next_run_plan(sn) or UNKNOWN_PLAN,
+            "next_run_plan": next_plan or UNKNOWN_PLAN,
             "previous_completed_plan": self.coordinator.previous_completed_plan.get(sn)
             or UNKNOWN_PLAN,
             "active_plan": self.coordinator.active_plan_name.get(sn) or UNKNOWN_PLAN,
+            "growth_rate_inches_per_day": growth_metrics["growth_rate_inches_per_day"],
+            "growth_model": growth_metrics["growth_model"],
         }
+        if next_detail is not None:
+            attrs["next_growth_since_last_mow_in"] = next_detail[
+                "growth_since_last_mow_in"
+            ]
+            attrs["next_growth_days"] = next_detail["growth_days"]
+            attrs["next_last_mowed_at"] = next_detail["last_mowed_at"]
         if self._key == "next_run_plan":
             attrs["source"] = "sequence" if next_sequence_plan else "selected_plan"
         return attrs

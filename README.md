@@ -2,7 +2,7 @@
 
 Standalone Home Assistant custom integration and dashboard for controlling a Yarbo mower through `yarbo-data-sdk`.
 
-This project is separate from the existing YarboHA integration and does not depend on the older YarboCadenceEQ package.
+This project is separate from the existing YarboHA integration.
 
 ## Features
 
@@ -10,6 +10,7 @@ This project is separate from the existing YarboHA integration and does not depe
 - Native `lawn_mower` entity for start, pause, and dock controls.
 - Direct command buttons for start, stop, dock, wake, refresh, and plan refresh.
 - Local plan selector and persistent plan sequence queue.
+- Per-plan grass growth estimates attached to the sequence list.
 - Sensors for previous completed plan, next run plan, current sequence position, battery, RTK, recharge status, charging power, mower head, rain sensor, and errors.
 - Weather and sun-derived mowing condition and grass wetness scores.
 - Configurable blackout windows after sunrise and before sunset.
@@ -44,6 +45,17 @@ The sequence queue is stored by the integration and survives Home Assistant rest
 - `Previous Completed Plan` updates after Yarbo reports that an app-started plan completed.
 
 When the queue has at least one plan, Start runs the next queued plan. When the queue is empty, Start uses the normal selected plan.
+
+## Grass Growth Tracking
+
+Each known plan gets a local growth counter. The `Plan Sequence` sensor exposes the queued plans as detailed attributes with:
+
+- `growth_since_last_mow_in`
+- `growth_days`
+- `growth_started_at`
+- `last_mowed_at`
+
+The app estimates growth from current weather, temperature, cloud cover, humidity, and sun state. When a plan started by this app completes, that plan's growth counter resets to `0.0` and its `last_mowed_at` timestamp is updated.
 
 ## Notes
 

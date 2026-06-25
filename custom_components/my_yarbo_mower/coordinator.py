@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,6 +16,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 from yarbo_robot_sdk import (
     AuthenticationError,
     TokenExpiredError,
@@ -39,6 +41,15 @@ HEARTBEAT_TIMEOUT_SECONDS = 90
 HEARTBEAT_CHECK_INTERVAL = timedelta(seconds=5)
 SEQUENCE_STORE_VERSION = 1
 SEQUENCE_STORE_DELAY = 2
+GROWTH_UPDATE_INTERVAL = timedelta(minutes=30)
+GROWTH_MAX_CATCHUP_HOURS = 24.0
+GROWTH_MAX_DAILY_INCHES = 0.16
+GROWTH_OPTIMAL_TEMP_F = 68.0
+GROWTH_TEMP_SPREAD_F = 18.0
+WEATHER_ENTITY = "weather.forecast_home"
+SUN_ENTITY = "sun.sun"
+WET_WEATHER = {"rainy", "pouring", "lightning-rainy", "snowy-rainy", "snowy", "hail"}
+BAD_GROWTH_WEATHER = {"lightning", "exceptional", "hail", "snowy", "snowy-rainy"}
 
 
 def _deep_merge(target: dict[str, Any], source: dict[str, Any]) -> bool:
@@ -65,6 +76,13 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Owns the direct SDK connection for the standalone app."""
 
@@ -86,12 +104,17 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.active_plan_name: dict[str, str | None] = {}
         self.active_sequence_plan: dict[str, bool] = {}
         self.previous_completed_plan: dict[str, str | None] = {}
+        self.plan_growth_inches: dict[str, dict[str, float]] = {}
+        self.plan_growth_started_at: dict[str, dict[str, str]] = {}
+        self.plan_last_mowed_at: dict[str, dict[str, str]] = {}
+        self._last_growth_update: dict[str, str] = {}
         self._last_planning_state: dict[str, int | None] = {}
         self._sequence_store = Store(
             hass, SEQUENCE_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_sequence"
         )
         self._last_heartbeat: dict[str, float] = {}
         self._unsub_heartbeat_check: CALLBACK_TYPE | None = None
+        self._unsub_growth_update: CALLBACK_TYPE | None = None
 
     async def async_setup(self) -> None:
         """Create SDK client, authenticate, subscribe, and fetch initial data."""
@@ -162,6 +185,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._unsub_heartbeat_check = async_track_time_interval(
             self.hass, self._async_check_heartbeats, HEARTBEAT_CHECK_INTERVAL
         )
+        self._unsub_growth_update = async_track_time_interval(
+            self.hass, self._async_update_plan_growth, GROWTH_UPDATE_INTERVAL
+        )
 
         self.entry.async_create_background_task(
             self.hass,
@@ -175,6 +201,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self._unsub_heartbeat_check:
             self._unsub_heartbeat_check()
             self._unsub_heartbeat_check = None
+        if self._unsub_growth_update:
+            self._unsub_growth_update()
+            self._unsub_growth_update = None
         if self._client is not None:
             await self.hass.async_add_executor_job(self._client.close)
             self._client = None
@@ -238,6 +267,8 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 )
             self.plan_data[sn] = result.get("data", {}).get("data", [])
             self._ensure_sequence_picker(sn)
+            self._ensure_plan_growth_entries(sn)
+            self._persist_sequence()
             self.async_set_updated_data(self.data)
         except TimeoutError:
             _LOGGER.warning("Plan request timed out for %s", sn)
@@ -372,12 +403,60 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 str(sn): str(plan) if plan else None for sn, plan in previous.items()
             }
 
+        growth = stored.get("plan_growth_inches") or {}
+        if isinstance(growth, dict):
+            self.plan_growth_inches = {
+                str(sn): {
+                    str(plan): max(0.0, float(value))
+                    for plan, value in plans.items()
+                    if _as_float(value) is not None
+                }
+                for sn, plans in growth.items()
+                if isinstance(plans, dict)
+            }
+
+        started = stored.get("plan_growth_started_at") or {}
+        if isinstance(started, dict):
+            self.plan_growth_started_at = {
+                str(sn): {
+                    str(plan): str(value)
+                    for plan, value in plans.items()
+                    if self._parse_datetime(value) is not None
+                }
+                for sn, plans in started.items()
+                if isinstance(plans, dict)
+            }
+
+        last_mowed = stored.get("plan_last_mowed_at") or {}
+        if isinstance(last_mowed, dict):
+            self.plan_last_mowed_at = {
+                str(sn): {
+                    str(plan): str(value)
+                    for plan, value in plans.items()
+                    if self._parse_datetime(value) is not None
+                }
+                for sn, plans in last_mowed.items()
+                if isinstance(plans, dict)
+            }
+
+        last_growth_update = stored.get("last_growth_update") or {}
+        if isinstance(last_growth_update, dict):
+            self._last_growth_update = {
+                str(sn): str(value)
+                for sn, value in last_growth_update.items()
+                if self._parse_datetime(value) is not None
+            }
+
     def _sequence_store_data(self) -> dict[str, Any]:
         return {
             "plan_sequence": self.plan_sequence,
             "sequence_index": self.sequence_index,
             "sequence_picker": self.sequence_picker,
             "previous_completed_plan": self.previous_completed_plan,
+            "plan_growth_inches": self.plan_growth_inches,
+            "plan_growth_started_at": self.plan_growth_started_at,
+            "plan_last_mowed_at": self.plan_last_mowed_at,
+            "last_growth_update": self._last_growth_update,
         }
 
     def _persist_sequence(self) -> None:
@@ -434,6 +513,16 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def next_run_plan(self, sn: str) -> str | None:
         """Return the plan used by the next start command."""
         return self.next_sequence_plan(sn) or self.selected_plan_name.get(sn)
+
+    def plan_growth_details(
+        self, sn: str, plan_names: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return display-ready growth details for plans."""
+        names = plan_names if plan_names is not None else self.plan_names(sn)
+        return [
+            self._plan_growth_detail(sn, plan_name, index + 1)
+            for index, plan_name in enumerate(names)
+        ]
 
     def set_sequence_picker(self, sn: str, plan_name: str) -> None:
         """Select a plan name for queue editing."""
@@ -544,6 +633,43 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if changed:
             self.async_set_updated_data(self.data)
 
+    async def _async_update_plan_growth(self, _now=None) -> None:
+        """Accumulate estimated grass growth for each known plan."""
+        now = dt_util.now()
+        growth_rate = self._growth_rate_inches_per_day()
+        changed = False
+
+        for device in self.devices:
+            sn = device.sn
+            self._ensure_plan_growth_entries(sn, now)
+
+            last_update = self._parse_datetime(self._last_growth_update.get(sn))
+            self._last_growth_update[sn] = now.isoformat()
+            if last_update is None:
+                changed = True
+                continue
+
+            elapsed_hours = (now - last_update).total_seconds() / 3600
+            if elapsed_hours <= 0:
+                continue
+
+            elapsed_hours = min(elapsed_hours, GROWTH_MAX_CATCHUP_HOURS)
+            increment = growth_rate * (elapsed_hours / 24)
+            if increment <= 0:
+                changed = True
+                continue
+
+            plan_growth = self.plan_growth_inches.setdefault(sn, {})
+            for plan_name in self._known_growth_plan_names(sn):
+                plan_growth[plan_name] = round(
+                    max(0.0, plan_growth.get(plan_name, 0.0) + increment), 3
+                )
+                changed = True
+
+        if changed:
+            self._persist_sequence()
+            self.async_set_updated_data(self.data or {})
+
     def _ensure_sequence_picker(self, sn: str) -> None:
         if self.sequence_picker.get(sn) in self.plan_names(sn):
             return
@@ -558,6 +684,56 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._ensure_sequence_picker(sn)
         plan_name = self.sequence_picker.get(sn)
         return plan_name if plan_name in self.plan_names(sn) else None
+
+    def _known_growth_plan_names(self, sn: str) -> list[str]:
+        names: list[str] = []
+        for plan_name in (
+            self.plan_names(sn)
+            + self.plan_sequence.get(sn, [])
+            + list(self.plan_growth_inches.get(sn, {}))
+        ):
+            if plan_name not in names:
+                names.append(plan_name)
+        return names
+
+    def _ensure_plan_growth_entries(
+        self, sn: str, now: datetime | None = None
+    ) -> None:
+        now = now or dt_util.now()
+        now_iso = now.isoformat()
+        plan_growth = self.plan_growth_inches.setdefault(sn, {})
+        plan_started = self.plan_growth_started_at.setdefault(sn, {})
+        for plan_name in self._known_growth_plan_names(sn):
+            plan_growth.setdefault(plan_name, 0.0)
+            plan_started.setdefault(plan_name, now_iso)
+
+    def _reset_plan_growth(self, sn: str, plan_name: str) -> None:
+        now_iso = dt_util.now().isoformat()
+        self.plan_growth_inches.setdefault(sn, {})[plan_name] = 0.0
+        self.plan_growth_started_at.setdefault(sn, {})[plan_name] = now_iso
+        self.plan_last_mowed_at.setdefault(sn, {})[plan_name] = now_iso
+
+    def _plan_growth_detail(
+        self, sn: str, plan_name: str, position: int | None = None
+    ) -> dict[str, Any]:
+        started_at = self.plan_growth_started_at.get(sn, {}).get(plan_name)
+        last_mowed_at = self.plan_last_mowed_at.get(sn, {}).get(plan_name)
+        started = self._parse_datetime(started_at)
+        growth_days = None
+        if started is not None:
+            growth_days = round(
+                max(0.0, (dt_util.now() - started).total_seconds() / 86400), 1
+            )
+        return {
+            "position": position,
+            "name": plan_name,
+            "growth_since_last_mow_in": round(
+                self.plan_growth_inches.get(sn, {}).get(plan_name, 0.0), 2
+            ),
+            "growth_days": growth_days,
+            "growth_started_at": started_at,
+            "last_mowed_at": last_mowed_at,
+        }
 
     def _sequence_index_for(self, sn: str) -> int:
         sequence = self.plan_sequence.get(sn, [])
@@ -595,6 +771,8 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return
 
         self.previous_completed_plan[sn] = plan_name
+        if plan_name != UNKNOWN_PLAN:
+            self._reset_plan_growth(sn, plan_name)
         if self.active_sequence_plan.pop(sn, False):
             sequence = self.plan_sequence.get(sn, [])
             if sequence:
@@ -608,3 +786,108 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
+
+    def growth_weather_metrics(self) -> dict[str, Any]:
+        """Return the current grass-growth model inputs and output."""
+        metrics = self._growth_weather_inputs()
+        metrics["growth_rate_inches_per_day"] = self._growth_rate_inches_per_day(
+            metrics
+        )
+        metrics["growth_model"] = "cool-season temperature potential"
+        metrics["max_daily_growth_inches"] = GROWTH_MAX_DAILY_INCHES
+        return metrics
+
+    def _growth_rate_inches_per_day(
+        self, metrics: dict[str, Any] | None = None
+    ) -> float:
+        metrics = metrics or self._growth_weather_inputs()
+        temp_f = metrics["temperature_f"]
+        humidity = metrics["humidity"]
+        cloud_coverage = metrics["cloud_coverage"]
+        condition = metrics["condition"]
+        sun_state = metrics["sun_state"]
+
+        if temp_f is None:
+            temp_factor = 0.35
+        else:
+            temp_factor = math.exp(
+                -0.5 * ((temp_f - GROWTH_OPTIMAL_TEMP_F) / GROWTH_TEMP_SPREAD_F) ** 2
+            )
+            if temp_f < 38 or temp_f > 100:
+                temp_factor = 0.0
+
+        moisture_factor = 1.0
+        if humidity is not None:
+            if humidity < 25:
+                moisture_factor = 0.55
+            elif humidity < 40:
+                moisture_factor = 0.75
+            elif humidity > 96:
+                moisture_factor = 0.85
+
+        sunlight_factor = 0.9
+        if cloud_coverage is not None:
+            if cloud_coverage >= 90:
+                sunlight_factor = 0.65
+            elif cloud_coverage >= 70:
+                sunlight_factor = 0.8
+            elif cloud_coverage <= 30:
+                sunlight_factor = 1.0
+        if sun_state == "below_horizon":
+            sunlight_factor *= 0.75
+
+        weather_factor = 0.65 if condition in BAD_GROWTH_WEATHER else 1.0
+        return round(
+            GROWTH_MAX_DAILY_INCHES
+            * temp_factor
+            * moisture_factor
+            * sunlight_factor
+            * weather_factor,
+            4,
+        )
+
+    def _growth_weather_inputs(self) -> dict[str, Any]:
+        weather_entity = self._weather_entity_id()
+        weather = self.hass.states.get(weather_entity)
+        sun = self.hass.states.get(SUN_ENTITY)
+        attrs = weather.attributes if weather is not None else {}
+
+        return {
+            "weather_entity": weather_entity,
+            "condition": weather.state if weather is not None else None,
+            "temperature_f": self._temperature_f(attrs.get("temperature")),
+            "humidity": self._float_value(attrs.get("humidity")),
+            "cloud_coverage": self._float_value(attrs.get("cloud_coverage")),
+            "sun_state": sun.state if sun is not None else None,
+        }
+
+    def _weather_entity_id(self) -> str:
+        if self.hass.states.get(WEATHER_ENTITY) is not None:
+            return WEATHER_ENTITY
+        weather_states = self.hass.states.async_all("weather")
+        if weather_states:
+            return weather_states[0].entity_id
+        return WEATHER_ENTITY
+
+    def _temperature_f(self, value: Any) -> float | None:
+        raw = self._float_value(value)
+        if raw is None:
+            return None
+        unit = str(self.hass.config.units.temperature_unit)
+        if unit in {"°C", "C"}:
+            return round(raw * 9 / 5 + 32, 1)
+        return round(raw, 1)
+
+    def _float_value(self, value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_datetime(self, value: Any) -> datetime | None:
+        if value is None:
+            return None
+        parsed = dt_util.parse_datetime(str(value))
+        if parsed is None:
+            return None
+        return dt_util.as_local(parsed)

@@ -91,7 +91,9 @@ views:
 
               {% if sequence | length > 0 %}
               {% for plan in sequence %}
-              {% if loop.index0 == current %}- next: {{ plan }}{% else %}- {{ plan }}{% endif %}
+              {% set growth = plan.growth_since_last_mow_in %}
+              {% set days = plan.growth_days %}
+              {% if loop.index0 == current %}- next: {{ plan.name }} · {{ growth }} in{% else %}- {{ plan.name }} · {{ growth }} in{% endif %}{% if days not in [none, ''] %} · {{ days }} d{% endif %}
               {% endfor %}
               {% else %}
               Sequence is empty.
