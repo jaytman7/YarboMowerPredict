@@ -14,6 +14,7 @@ This project is separate from the existing YarboHA integration.
 - Sensors for previous completed plan, next run plan, current sequence position, battery, RTK, recharge status, charging power, mower head, rain sensor, and errors.
 - Weather and sun-derived mowing condition and grass wetness scores.
 - Three-hour weather lookahead that blocks starting when bad weather is expected.
+- Best mow start prediction for the driest, coolest usable daylight forecast window.
 - Configurable blackout windows after sunrise and before sunset.
 - YAML dashboard at `yarbo_mower_app-dashboard.yaml`.
 
@@ -63,6 +64,8 @@ The app estimates growth from current weather, temperature, cloud cover, humidit
 The app checks Home Assistant's hourly weather forecast for the next three hours. Starting is blocked when the current weather or lookahead window contains rain, storms, snow/hail, measurable precipitation, high precipitation probability, or high wind.
 
 The `Weather Window` sensor exposes the current decision, reason, checked timestamp, forecast horizon, and the forecast entries considered by the gate.
+
+The `Best Mow Start` sensor ranks the next 24 hours of hourly forecast entries that fall inside usable daylight. It uses the later of the configured sunrise blackout or a 5-hour dew-drying window, and it also avoids the configured sunset blackout. It favors dry, cool, sunny, lower-wind forecast slots and exposes the top candidates as attributes.
 
 ## Notes
 

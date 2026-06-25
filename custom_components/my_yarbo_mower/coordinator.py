@@ -10,10 +10,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -47,15 +50,21 @@ GROWTH_MAX_DAILY_INCHES = 0.16
 GROWTH_OPTIMAL_TEMP_F = 68.0
 GROWTH_TEMP_SPREAD_F = 18.0
 WEATHER_LOOKAHEAD_HOURS = 3
-WEATHER_LOOKAHEAD_UPDATE_INTERVAL = timedelta(minutes=15)
+WEATHER_LOOKAHEAD_UPDATE_INTERVAL = timedelta(minutes=2)
 WEATHER_LOOKAHEAD_PRECIP_PROBABILITY = 35.0
 WEATHER_LOOKAHEAD_PRECIP_AMOUNT = 0.01
 WEATHER_LOOKAHEAD_WIND_SPEED = 25.0
+BEST_MOW_START_LOOKAHEAD_HOURS = 24
+BEST_MOW_START_TARGET_TEMP_F = 68.0
+BEST_MOW_START_MIN_DRYING_HOURS = 5.0
 WEATHER_ENTITY = "weather.forecast_home"
 SUN_ENTITY = "sun.sun"
+UNAVAILABLE_STATES = {STATE_UNKNOWN, STATE_UNAVAILABLE}
 WET_WEATHER = {"rainy", "pouring", "lightning-rainy", "snowy-rainy", "snowy", "hail"}
 START_BLOCK_WEATHER = WET_WEATHER | {"lightning", "exceptional"}
 BAD_GROWTH_WEATHER = {"lightning", "exceptional", "hail", "snowy", "snowy-rainy"}
+SUNNY_WEATHER = {"sunny", "partlycloudy", "partly-cloudy"}
+DULL_WEATHER = {"cloudy", "fog"}
 
 
 def _deep_merge(target: dict[str, Any], source: dict[str, Any]) -> bool:
@@ -120,6 +129,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "reason": "not checked",
             "horizon_hours": WEATHER_LOOKAHEAD_HOURS,
         }
+        self.weather_forecast: list[dict[str, Any]] = []
         self._last_planning_state: dict[str, int | None] = {}
         self._sequence_store = Store(
             hass, SEQUENCE_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_sequence"
@@ -128,6 +138,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._unsub_heartbeat_check: CALLBACK_TYPE | None = None
         self._unsub_growth_update: CALLBACK_TYPE | None = None
         self._unsub_weather_lookahead: CALLBACK_TYPE | None = None
+        self._unsub_weather_state: CALLBACK_TYPE | None = None
 
     async def async_setup(self) -> None:
         """Create SDK client, authenticate, subscribe, and fetch initial data."""
@@ -206,6 +217,11 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self._async_update_weather_lookahead,
             WEATHER_LOOKAHEAD_UPDATE_INTERVAL,
         )
+        self._unsub_weather_state = async_track_state_change_event(
+            self.hass,
+            [self._weather_entity_id()],
+            self._async_weather_source_changed,
+        )
 
         self.entry.async_create_background_task(
             self.hass,
@@ -230,6 +246,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self._unsub_weather_lookahead:
             self._unsub_weather_lookahead()
             self._unsub_weather_lookahead = None
+        if self._unsub_weather_state:
+            self._unsub_weather_state()
+            self._unsub_weather_state = None
         if self._client is not None:
             await self.hass.async_add_executor_job(self._client.close)
             self._client = None
@@ -553,6 +572,74 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         reason = self.weather_lookahead.get("reason") or "bad weather expected"
         return f"Cannot start: {reason}"
 
+    def best_mow_start(self, sn: str) -> dict[str, Any]:
+        """Return the best predicted mow start in the next daylight window."""
+        now = dt_util.now()
+        horizon = now + timedelta(hours=BEST_MOW_START_LOOKAHEAD_HOURS)
+        sun = self.hass.states.get(SUN_ENTITY)
+        sun_attrs = sun.attributes if sun is not None else {}
+        sun_state = sun.state if sun is not None else None
+        windows = self._daylight_windows(sn, now, horizon, sun_attrs, sun_state)
+        candidates: list[dict[str, Any]] = []
+
+        for item in self._forecast_window(self.weather_forecast, now, horizon):
+            start = self._parse_datetime(item.get("datetime"))
+            if start is None or not self._in_windows(start, windows):
+                continue
+            candidate = self._best_mow_candidate(item)
+            if candidate is not None:
+                candidates.append(candidate)
+
+        candidates.sort(key=lambda candidate: candidate["score"], reverse=True)
+        if candidates:
+            best = candidates[0]
+            return {
+                "status": "ready",
+                "start_at": best["datetime"],
+                "display": self._display_time(best["datetime"]),
+                "score": best["score"],
+                "reason": best["reason"],
+                "temperature_f": best["temperature_f"],
+                "condition": best["condition"],
+                "precipitation_probability": best["precipitation_probability"],
+                "precipitation": best["precipitation"],
+                "wind_speed": best["wind_speed"],
+                "candidate_count": len(candidates),
+                "minimum_drying_after_sunrise_hours": max(
+                    self.morning_blackout_hours.get(sn, 3.0),
+                    BEST_MOW_START_MIN_DRYING_HOURS,
+                ),
+                "candidates": candidates[:5],
+                "daylight_windows": [
+                    {
+                        "start": window_start.isoformat(),
+                        "end": window_end.isoformat(),
+                    }
+                    for window_start, window_end in windows
+                ],
+            }
+
+        return {
+            "status": "unknown",
+            "start_at": None,
+            "display": "Unknown",
+            "score": None,
+            "reason": "no usable sunny daylight forecast found",
+            "candidate_count": 0,
+            "minimum_drying_after_sunrise_hours": max(
+                self.morning_blackout_hours.get(sn, 3.0),
+                BEST_MOW_START_MIN_DRYING_HOURS,
+            ),
+            "candidates": [],
+            "daylight_windows": [
+                {
+                    "start": window_start.isoformat(),
+                    "end": window_end.isoformat(),
+                }
+                for window_start, window_end in windows
+            ],
+        }
+
     def plan_growth_details(
         self, sn: str, plan_names: list[str] | None = None
     ) -> list[dict[str, Any]]:
@@ -716,6 +803,14 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.weather_lookahead = lookahead
             self.async_set_updated_data(self.data or {})
 
+    @callback
+    def _async_weather_source_changed(self, _event: Event) -> None:
+        self.entry.async_create_background_task(
+            self.hass,
+            self._async_update_weather_lookahead(),
+            name=f"{DOMAIN}_weather_lookahead_state_changed",
+        )
+
     async def _async_weather_lookahead(self) -> dict[str, Any]:
         weather_entity = self._weather_entity_id()
         now = dt_util.now()
@@ -723,7 +818,6 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         weather = self.hass.states.get(weather_entity)
         attrs = weather.attributes if weather is not None else {}
         current_condition = weather.state if weather is not None else None
-        current_reason = self._current_weather_block_reason(current_condition, attrs)
 
         base: dict[str, Any] = {
             "status": "clear",
@@ -740,6 +834,17 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "first_bad_weather_condition": None,
             "forecast": [],
         }
+
+        if weather is None or current_condition in UNAVAILABLE_STATES:
+            base.update(
+                {
+                    "status": "unknown",
+                    "reason": f"{weather_entity} is unavailable",
+                }
+            )
+            return base
+
+        current_reason = self._current_weather_block_reason(current_condition, attrs)
 
         if current_reason is not None:
             base.update(
@@ -783,6 +888,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         forecast = self._extract_forecast(response, weather_entity)
         considered = self._forecast_window(forecast, now, horizon)
+        self.weather_forecast = self._forecast_window(
+            forecast, now, now + timedelta(hours=BEST_MOW_START_LOOKAHEAD_HOURS)
+        )
         base["forecast_available"] = bool(forecast)
         base["forecast_count"] = len(considered)
         base["forecast"] = considered
@@ -899,6 +1007,159 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return f"{wind_speed:g} wind forecast {when}"
 
         return None
+
+    def _daylight_windows(
+        self,
+        sn: str,
+        now: datetime,
+        horizon: datetime,
+        sun_attrs: dict[str, Any],
+        sun_state: str | None,
+    ) -> list[tuple[datetime, datetime]]:
+        next_rising = self._parse_datetime(sun_attrs.get("next_rising"))
+        next_setting = self._parse_datetime(sun_attrs.get("next_setting"))
+        if next_rising is None or next_setting is None:
+            return []
+
+        windows: list[tuple[datetime, datetime]] = []
+        morning_blackout = timedelta(
+            hours=max(
+                self.morning_blackout_hours.get(sn, 3.0),
+                BEST_MOW_START_MIN_DRYING_HOURS,
+            )
+        )
+        evening_blackout = timedelta(
+            hours=self.evening_blackout_hours.get(sn, 3.0)
+        )
+
+        if sun_state == "above_horizon":
+            rising = next_rising - timedelta(days=1)
+            setting = next_setting
+        else:
+            rising = next_rising
+            setting = next_setting
+            if setting <= rising:
+                setting += timedelta(days=1)
+
+        for offset in (timedelta(0), timedelta(days=1)):
+            start = rising + offset + morning_blackout
+            end = setting + offset - evening_blackout
+            if end <= start:
+                continue
+            start = max(start, now)
+            end = min(end, horizon)
+            if end > start:
+                windows.append((start, end))
+        return windows
+
+    def _in_windows(
+        self, value: datetime, windows: list[tuple[datetime, datetime]]
+    ) -> bool:
+        return any(start <= value <= end for start, end in windows)
+
+    def _best_mow_candidate(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        condition = item.get("condition")
+        if condition in START_BLOCK_WEATHER:
+            return None
+
+        probability = self._float_value(item.get("precipitation_probability"))
+        precipitation = self._float_value(item.get("precipitation"))
+        wind_speed = self._float_value(item.get("wind_speed"))
+        temperature = self._float_value(item.get("temperature"))
+
+        if precipitation is not None and precipitation >= WEATHER_LOOKAHEAD_PRECIP_AMOUNT:
+            return None
+        if (
+            probability is not None
+            and probability >= WEATHER_LOOKAHEAD_PRECIP_PROBABILITY
+        ):
+            return None
+        if wind_speed is not None and wind_speed >= WEATHER_LOOKAHEAD_WIND_SPEED:
+            return None
+
+        dry_score = 100.0
+        if probability is not None:
+            dry_score -= min(70.0, probability * 1.25)
+        if precipitation is not None:
+            dry_score -= min(80.0, precipitation * 300.0)
+        if condition in DULL_WEATHER:
+            dry_score -= 12.0
+        elif condition in SUNNY_WEATHER:
+            dry_score += 8.0
+
+        if temperature is None:
+            cool_score = 55.0
+        else:
+            cool_score = 100.0 - abs(temperature - BEST_MOW_START_TARGET_TEMP_F) * 3.0
+            if temperature >= 85:
+                cool_score -= (temperature - 85) * 3.0
+            elif temperature <= 45:
+                cool_score -= (45 - temperature) * 2.0
+
+        sun_score = 75.0
+        if condition == "sunny":
+            sun_score = 100.0
+        elif condition in {"partlycloudy", "partly-cloudy"}:
+            sun_score = 88.0
+        elif condition == "cloudy":
+            sun_score = 52.0
+        elif condition == "fog":
+            sun_score = 35.0
+
+        wind_score = 90.0
+        if wind_speed is not None:
+            wind_score = 100.0 - max(0.0, wind_speed - 5.0) * 3.0
+
+        score = self._clamp_float(
+            dry_score * 0.42 + cool_score * 0.34 + sun_score * 0.18 + wind_score * 0.06
+        )
+        return {
+            "datetime": item.get("datetime"),
+            "display": self._display_time(item.get("datetime")),
+            "score": round(score, 1),
+            "reason": self._best_mow_reason(
+                condition,
+                temperature,
+                probability,
+                precipitation,
+                wind_speed,
+            ),
+            "condition": condition,
+            "temperature_f": temperature,
+            "precipitation_probability": probability,
+            "precipitation": precipitation,
+            "wind_speed": wind_speed,
+        }
+
+    def _best_mow_reason(
+        self,
+        condition: str | None,
+        temperature: float | None,
+        probability: float | None,
+        precipitation: float | None,
+        wind_speed: float | None,
+    ) -> str:
+        parts: list[str] = []
+        if condition:
+            parts.append(str(condition))
+        if temperature is not None:
+            parts.append(f"{temperature:g} F")
+        if probability is not None:
+            parts.append(f"{probability:g}% precip")
+        if precipitation is not None and precipitation > 0:
+            parts.append(f"{precipitation:g} precip")
+        if wind_speed is not None:
+            parts.append(f"{wind_speed:g} wind")
+        return ", ".join(parts) or "best dry/cool daylight window"
+
+    def _display_time(self, value: Any) -> str:
+        parsed = self._parse_datetime(value)
+        if parsed is None:
+            return "Unknown"
+        return parsed.strftime("%-I:%M %p")
+
+    def _clamp_float(self, value: float) -> float:
+        return max(0.0, min(100.0, value))
 
     def _forecast_time_label(self, value: Any) -> str:
         parsed = self._parse_datetime(value)
@@ -1103,8 +1364,21 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         }
 
     def _weather_entity_id(self) -> str:
-        if self.hass.states.get(WEATHER_ENTITY) is not None:
+        preferred = self.hass.states.get(WEATHER_ENTITY)
+        if preferred is not None and preferred.state not in UNAVAILABLE_STATES:
             return WEATHER_ENTITY
+
+        weather_states = [
+            state
+            for state in self.hass.states.async_all("weather")
+            if state.state not in UNAVAILABLE_STATES
+        ]
+        if weather_states:
+            return weather_states[0].entity_id
+
+        if preferred is not None:
+            return WEATHER_ENTITY
+
         weather_states = self.hass.states.async_all("weather")
         if weather_states:
             return weather_states[0].entity_id

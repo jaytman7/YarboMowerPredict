@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPower
+from homeassistant.const import PERCENTAGE, STATE_UNAVAILABLE, STATE_UNKNOWN, UnitOfPower
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
@@ -68,6 +68,7 @@ SENSORS = [
 
 WEATHER_ENTITY = "weather.forecast_home"
 SUN_ENTITY = "sun.sun"
+UNAVAILABLE_STATES = {STATE_UNKNOWN, STATE_UNAVAILABLE}
 WET_WEATHER = {"rainy", "pouring", "lightning-rainy", "snowy-rainy", "snowy", "hail"}
 DAMP_WEATHER = {"fog", "cloudy"}
 BAD_WEATHER = {"lightning", "exceptional", "windy", "windy-variant"}
@@ -92,6 +93,7 @@ async def async_setup_entry(
         entities.append(MyYarboSequenceSensor(coordinator, device, "previous_completed_plan"))
         entities.append(MyYarboSequenceSensor(coordinator, device, "next_run_plan"))
         entities.append(MyYarboWeatherWindowSensor(coordinator, device))
+        entities.append(MyYarboBestMowStartSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -223,6 +225,26 @@ class MyYarboWeatherWindowSensor(MyYarboEntity, SensorEntity):
         return dict(self.coordinator.weather_lookahead)
 
 
+class MyYarboBestMowStartSensor(MyYarboEntity, SensorEntity):
+    """Best predicted daylight mow start sensor."""
+
+    _attr_icon = "mdi:weather-sunny-clock"
+
+    def __init__(self, coordinator: MyYarboCoordinator, device) -> None:
+        super().__init__(coordinator, device, "best_mow_start")
+        self._attr_name = f"{APP_NAME} Best Mow Start"
+
+    @property
+    def native_value(self) -> str:
+        """Return the best predicted start time."""
+        return self.coordinator.best_mow_start(self._device.sn).get("display", "Unknown")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return best-start scoring details."""
+        return self.coordinator.best_mow_start(self._device.sn)
+
+
 class MyYarboConditionSensor(MyYarboEntity, SensorEntity):
     """Weather/sun derived mowing condition sensor."""
 
@@ -299,7 +321,17 @@ class MyYarboConditionSensor(MyYarboEntity, SensorEntity):
         self.async_write_ha_state()
 
     def _weather_entity_id(self) -> str:
-        if self.hass.states.get(WEATHER_ENTITY) is not None:
+        preferred = self.hass.states.get(WEATHER_ENTITY)
+        if preferred is not None and preferred.state not in UNAVAILABLE_STATES:
+            return WEATHER_ENTITY
+        available = [
+            state
+            for state in self.hass.states.async_all("weather")
+            if state.state not in UNAVAILABLE_STATES
+        ]
+        if available:
+            return available[0].entity_id
+        if preferred is not None:
             return WEATHER_ENTITY
         weather_states = self.hass.states.async_all("weather")
         if weather_states:
