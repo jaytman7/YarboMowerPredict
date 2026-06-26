@@ -6,6 +6,8 @@
   between cold-weather and warm-weather temperature response curves.
 - Shows the active growth model and estimated growth rate on the generated
   dashboard.
+- Adds a Mowing Status dashboard pane that lists current start blockers or
+  confirms that the next sequence plan is clear to mow.
 
 ## 0.1.0
 

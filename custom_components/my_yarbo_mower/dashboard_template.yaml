@@ -50,6 +50,36 @@ views:
                   yellow: 45
                   red: 70
 
+          - type: markdown
+            title: Mowing Status
+            content: |
+              {% set ready = is_state('@@AUTO_SEQUENCE_READY_BINARY_SENSOR@@', 'on') %}
+              {% set reasons = state_attr('@@AUTO_SEQUENCE_READY_BINARY_SENSOR@@', 'reasons') or [] %}
+              {% set reason = state_attr('@@AUTO_SEQUENCE_READY_BINARY_SENSOR@@', 'reason') %}
+              {% set next_plan = state_attr('@@AUTO_SEQUENCE_READY_BINARY_SENSOR@@', 'next_sequence_plan') or states('@@NEXT_RUN_PLAN_SENSOR@@') %}
+              {% set weather_reason = state_attr('@@WEATHER_WINDOW_SENSOR@@', 'reason') %}
+              {% if ready %}
+              **Clear to mow**
+
+              Next sequence: {{ next_plan }}
+              {% else %}
+              **Blocked from mowing**
+
+              Next sequence: {{ next_plan }}
+              {% if reasons | length > 0 %}
+              {% for blocker in reasons %}
+              {% if loop.index <= 6 %}- {{ blocker }}
+              {% endif %}
+              {% endfor %}
+              {% if reasons | length > 6 %}- {{ reasons | length - 6 }} more blockers
+              {% endif %}
+              {% else %}
+              - {{ reason or 'waiting for readiness checks' }}
+              {% endif %}
+              {% endif %}
+
+              Weather window: {{ states('@@WEATHER_WINDOW_SENSOR@@') }}{% if weather_reason %} · {{ weather_reason }}{% endif %}
+
           - type: entities
             title: Conditions
             show_header_toggle: false
