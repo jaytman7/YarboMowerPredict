@@ -1,12 +1,12 @@
 {
   "domain": "my_yarbo_mower",
   "name": "My Yarbo Mower",
-  "codeowners": ["@jtichy"],
+  "codeowners": ["@jaytman7"],
   "config_flow": true,
-  "documentation": "https://github.com/jtichy/MyYarboHA",
+  "documentation": "https://github.com/jaytman7/YarboMowerPredict",
   "integration_type": "hub",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/jtichy/MyYarboHA/issues",
+  "issue_tracker": "https://github.com/jaytman7/YarboMowerPredict/issues",
   "requirements": ["yarbo-data-sdk>=0.2.1"],
   "version": "0.1.0"
 }

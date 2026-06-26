@@ -44,17 +44,14 @@ into the default HACS catalog, add it to HACS as a custom repository:
 
 1. Publish this repository to GitHub.
 2. In Home Assistant, open HACS, Custom repositories.
-3. Add the repository URL, for example `https://github.com/jtichy/MyYarboHA`.
+3. Add the repository URL, `https://github.com/jaytman7/YarboMowerPredict`.
 4. Select category `Integration`.
 5. Install `My Yarbo Mower` from HACS.
 6. Restart Home Assistant.
 7. Add the integration from Settings, Devices and services, Add integration,
    `My Yarbo Mower`.
 
-The GitHub repository URL is currently assumed to be
-`https://github.com/jtichy/MyYarboHA`. If the final GitHub owner or repository
-name is different, update `custom_components/my_yarbo_mower/manifest.json` and
-this README before publishing.
+The GitHub repository URL is `https://github.com/jaytman7/YarboMowerPredict`.
 
 ## HACS Release Checklist
 
