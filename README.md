@@ -89,6 +89,9 @@ Before tagging a public release:
   `codeowners` values for the GitHub repository.
 - Choose and add a repository license.
 - Run the HACS and hassfest GitHub Actions successfully.
+- Add a GitHub repository description and topics, then remove `description` and
+  `topics` from the ignored HACS workflow checks if submitting to the default
+  HACS catalog.
 - Keep `custom_components/my_yarbo_mower/manifest.json` `version` aligned with
   the release tag, for example manifest version `0.1.0` and Git tag `v0.1.0`.
 - Create a GitHub release from the tag so HACS users can install a stable
