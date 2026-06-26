@@ -1,0 +1,6 @@
+{
+  "name": "My Yarbo Mower",
+  "domains": ["my_yarbo_mower"],
+  "homeassistant": "2024.6.0",
+  "render_readme": true
+}

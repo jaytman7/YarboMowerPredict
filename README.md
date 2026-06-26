@@ -37,6 +37,38 @@ examples/configuration.yaml         Dashboard configuration snippet
 5. Add the dashboard snippet from `examples/configuration.yaml` to your Home Assistant `configuration.yaml`, then restart Home Assistant.
 6. The integration will generate `yarbo_mower_app-dashboard.yaml` automatically for a single selected mower when the file does not already exist. You can also press the `Generate Dashboard` button on the My Yarbo device, or call `my_yarbo_mower.generate_dashboard`, to regenerate it after renaming entities or changing devices.
 
+## Install with HACS
+
+This repository is structured as a HACS custom integration. Until it is accepted
+into the default HACS catalog, add it to HACS as a custom repository:
+
+1. Publish this repository to GitHub.
+2. In Home Assistant, open HACS, Custom repositories.
+3. Add the repository URL, for example `https://github.com/jtichy/MyYarboHA`.
+4. Select category `Integration`.
+5. Install `My Yarbo Mower` from HACS.
+6. Restart Home Assistant.
+7. Add the integration from Settings, Devices and services, Add integration,
+   `My Yarbo Mower`.
+
+The GitHub repository URL is currently assumed to be
+`https://github.com/jtichy/MyYarboHA`. If the final GitHub owner or repository
+name is different, update `custom_components/my_yarbo_mower/manifest.json` and
+this README before publishing.
+
+## HACS Release Checklist
+
+Before tagging a public release:
+
+- Confirm `manifest.json` has the correct `documentation`, `issue_tracker`, and
+  `codeowners` values for the GitHub repository.
+- Choose and add a repository license.
+- Run the HACS and hassfest GitHub Actions successfully.
+- Keep `custom_components/my_yarbo_mower/manifest.json` `version` aligned with
+  the release tag, for example manifest version `0.1.0` and Git tag `v0.1.0`.
+- Create a GitHub release from the tag so HACS users can install a stable
+  version instead of only the default branch.
+
 ## Dashboard Generation
 
 The dashboard is rendered from `custom_components/my_yarbo_mower/dashboard_template.yaml`.
