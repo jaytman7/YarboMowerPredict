@@ -88,15 +88,19 @@ Before tagging a public release:
 
 - Confirm `manifest.json` has the correct `documentation`, `issue_tracker`, and
   `codeowners` values for the GitHub repository.
-- Choose and add a repository license.
+- Keep `LICENSE` present so GitHub and HACS can detect the repository license.
 - Run the HACS and hassfest GitHub Actions successfully.
-- Add a GitHub repository description and topics, then remove `description` and
-  `topics` from the ignored HACS workflow checks if submitting to the default
-  HACS catalog.
+- Add a GitHub repository description, topics, and brand assets before
+  submitting to the default HACS catalog. The local HACS workflow keeps those
+  repository-level checks ignored until that metadata is configured on GitHub.
 - Keep `custom_components/my_yarbo_mower/manifest.json` `version` aligned with
   the release tag, for example manifest version `0.1.0` and Git tag `v0.1.0`.
 - Create a GitHub release from the tag so HACS users can install a stable
   version instead of only the default branch.
+
+## License
+
+MIT License. See `LICENSE`.
 
 ## Dashboard Generation
 
