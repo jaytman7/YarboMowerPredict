@@ -47,13 +47,12 @@ examples/configuration.yaml         Dashboard configuration snippet
 This repository is structured as a HACS custom integration. Until it is accepted
 into the default HACS catalog, add it to HACS as a custom repository:
 
-1. Publish this repository to GitHub.
-2. In Home Assistant, open HACS, Custom repositories.
-3. Add the repository URL, `https://github.com/jaytman7/YarboMowerPredict`.
-4. Select category `Integration`.
-5. Install `My Yarbo Mower` from HACS.
-6. Restart Home Assistant.
-7. Add the integration from Settings, Devices and services, Add integration,
+1. In Home Assistant, open HACS, Custom repositories.
+2. Add the repository URL, `https://github.com/jaytman7/YarboMowerPredict`.
+3. Select category `Integration`.
+4. Install `My Yarbo Mower` from HACS.
+5. Restart Home Assistant.
+6. Add the integration from Settings, Devices and services, Add integration,
    `My Yarbo Mower`.
 
 The GitHub repository URL is `https://github.com/jaytman7/YarboMowerPredict`.
