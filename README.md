@@ -53,6 +53,30 @@ into the default HACS catalog, add it to HACS as a custom repository:
 
 The GitHub repository URL is `https://github.com/jaytman7/YarboMowerPredict`.
 
+## Python Dependency Installation
+
+HACS installs the integration files, but Home Assistant installs the Python
+library dependency. This integration declares `yarbo-data-sdk>=0.2.1` in
+`custom_components/my_yarbo_mower/manifest.json`:
+
+```json
+"requirements": ["yarbo-data-sdk>=0.2.1"]
+```
+
+On a clean Home Assistant install that has never had YarboHA installed, the flow
+is:
+
+1. HACS downloads this repository into `custom_components/my_yarbo_mower`.
+2. Home Assistant restarts and reads the integration manifest.
+3. Home Assistant installs `yarbo-data-sdk` from PyPI into its dependency
+   environment before loading the integration.
+4. The integration imports `yarbo_robot_sdk` from that installed package.
+
+YarboHA and yarbo-cadence-eq are not required. If the package cannot be
+downloaded, or if PyPI does not have a compatible build for the Home Assistant
+Python version and platform, Home Assistant will fail to load this integration
+and log a requirement installation error.
+
 ## HACS Release Checklist
 
 Before tagging a public release:
