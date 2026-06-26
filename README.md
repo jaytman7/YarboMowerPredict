@@ -16,6 +16,7 @@ This project is separate from the existing YarboHA integration.
 - Three-hour weather lookahead that blocks starting when bad weather is expected.
 - Best mow start prediction for the driest, coolest usable daylight forecast window.
 - Configurable blackout windows after sunrise and before sunset.
+- Optional sequence automation gate with pre-start wake checks, RTK readiness checks, and adjustable thresholds.
 - Generated YAML dashboard at `yarbo_mower_app-dashboard.yaml` using the user's actual Home Assistant entity IDs.
 
 ## Repository Layout
@@ -68,6 +69,33 @@ The normal Home Assistant `Start` command always uses the selected `Plan` in the
 Mission section. A manually selected plan is not overridden just because the
 sequence has queued plans. Use `Run Sequence` when you want the mower to work
 through the queue.
+
+## Sequence Automation
+
+Automatic sequence behavior is opt-in and split into two switches:
+
+- `Auto Wake Checks` periodically wakes the mower near the predicted best start
+  time so online, battery, mower head, and RTK checks can settle.
+- `Auto Sequence Start` starts the next queued sequence plan only when all
+  readiness checks pass during the best-start grace window.
+
+The `Sequence Auto Ready` binary sensor exposes each check as attributes. It
+requires:
+
+- a queued sequence plan
+- current time inside the best-start grace window
+- clear three-hour weather window
+- mowing favorability above the configured minimum
+- grass wetness below the configured maximum
+- mower online
+- battery above the configured minimum
+- mower head attached
+- RTK ready
+- no active plan, return-to-charge, charging, obstacle, stuck, or error state
+
+Defaults are conservative: auto wake and auto start are off, minimum battery is
+`70%`, minimum favorability is `70%`, maximum wetness is `45%`, wake lead is
+`45` minutes, wake interval is `10` minutes, and start grace is `30` minutes.
 
 ## Grass Growth Tracking
 

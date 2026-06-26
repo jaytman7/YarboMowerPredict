@@ -196,13 +196,39 @@ views:
               - entity: "@@CLEAR_SEQUENCE_BUTTON@@"
                 name: Clear sequence
 
+          - type: entities
+            title: Sequence Automation
+            show_header_toggle: false
+            state_color: true
+            entities:
+              - entity: "@@AUTO_SEQUENCE_READY_BINARY_SENSOR@@"
+                name: Ready now
+              - entity: "@@AUTO_WAKE_CHECKS_SWITCH@@"
+                name: Auto wake checks
+              - entity: "@@AUTO_SEQUENCE_START_SWITCH@@"
+                name: Auto sequence start
+              - entity: "@@AUTO_MIN_BATTERY_NUMBER@@"
+                name: Min battery
+              - entity: "@@AUTO_MIN_FAVORABILITY_NUMBER@@"
+                name: Min favorability
+              - entity: "@@AUTO_MAX_WETNESS_NUMBER@@"
+                name: Max wetness
+              - entity: "@@AUTO_WAKE_LEAD_NUMBER@@"
+                name: Wake lead
+              - entity: "@@AUTO_WAKE_INTERVAL_NUMBER@@"
+                name: Wake interval
+              - entity: "@@AUTO_START_GRACE_NUMBER@@"
+                name: Start grace
+
           - type: markdown
             content: |
               {% set sequence = state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'plans') or [] %}
               {% set current = state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'sequence_index') | int(0) %}
+              {% set auto = state_attr('@@AUTO_SEQUENCE_READY_BINARY_SENSOR@@', 'reason') %}
               **Previous:** {{ states('@@PREVIOUS_COMPLETED_PLAN_SENSOR@@') }}
               **Start button:** {{ states('@@NEXT_RUN_PLAN_SENSOR@@') }}
               **Next sequence:** {{ state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'next_sequence_plan') or 'None' }}
+              **Auto:** {{ auto or 'unknown' }}
 
               {% if sequence | length > 0 %}
               {% for plan in sequence %}

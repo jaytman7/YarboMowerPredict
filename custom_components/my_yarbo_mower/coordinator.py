@@ -17,6 +17,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -30,11 +31,20 @@ from yarbo_robot_sdk.device_helpers import extract_field
 
 from .const import (
     ACTIVE_PLANNING_STATES,
+    AUTO_MAX_WETNESS_DEFAULT,
+    AUTO_MIN_BATTERY_DEFAULT,
+    AUTO_MIN_FAVORABILITY_DEFAULT,
+    AUTO_START_GRACE_MINUTES_DEFAULT,
+    AUTO_WAKE_INTERVAL_MINUTES_DEFAULT,
+    AUTO_WAKE_LEAD_MINUTES_DEFAULT,
+    CHARGING_RECHARGE_STATE,
     CONF_SELECTED_DEVICES,
     DATA_ACCESS_TOKEN,
     DATA_REFRESH_TOKEN,
     DOMAIN,
     COMPLETED_PLANNING_STATE,
+    MOWER_HEAD_TYPES,
+    RTK_READY,
     UNKNOWN_PLAN,
 )
 
@@ -54,6 +64,8 @@ WEATHER_LOOKAHEAD_UPDATE_INTERVAL = timedelta(minutes=2)
 WEATHER_LOOKAHEAD_PRECIP_PROBABILITY = 35.0
 WEATHER_LOOKAHEAD_PRECIP_AMOUNT = 0.01
 WEATHER_LOOKAHEAD_WIND_SPEED = 25.0
+AUTO_SEQUENCE_CHECK_INTERVAL = timedelta(minutes=1)
+AUTO_SEQUENCE_START_RETRY_INTERVAL = timedelta(minutes=10)
 BEST_MOW_START_LOOKAHEAD_HOURS = 24
 BEST_MOW_START_TARGET_TEMP_F = 68.0
 BEST_MOW_START_MIN_DRYING_HOURS = 5.0
@@ -113,6 +125,14 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.plan_start_percent: dict[str, int] = {}
         self.morning_blackout_hours: dict[str, float] = {}
         self.evening_blackout_hours: dict[str, float] = {}
+        self.auto_wake_checks: dict[str, bool] = {}
+        self.auto_sequence_start: dict[str, bool] = {}
+        self.auto_min_battery: dict[str, float] = {}
+        self.auto_min_favorability: dict[str, float] = {}
+        self.auto_max_wetness: dict[str, float] = {}
+        self.auto_start_grace_minutes: dict[str, float] = {}
+        self.auto_wake_lead_minutes: dict[str, float] = {}
+        self.auto_wake_interval_minutes: dict[str, float] = {}
         self.plan_sequence: dict[str, list[str]] = {}
         self.sequence_index: dict[str, int] = {}
         self.sequence_picker: dict[str, str | None] = {}
@@ -130,6 +150,10 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "horizon_hours": WEATHER_LOOKAHEAD_HOURS,
         }
         self.weather_forecast: list[dict[str, Any]] = []
+        self.auto_sequence_status: dict[str, dict[str, Any]] = {}
+        self._last_auto_wake_at: dict[str, str] = {}
+        self._last_auto_start_attempt_at: dict[str, str] = {}
+        self._last_auto_error: dict[str, str | None] = {}
         self._last_planning_state: dict[str, int | None] = {}
         self._sequence_store = Store(
             hass, SEQUENCE_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_sequence"
@@ -139,6 +163,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._unsub_growth_update: CALLBACK_TYPE | None = None
         self._unsub_weather_lookahead: CALLBACK_TYPE | None = None
         self._unsub_weather_state: CALLBACK_TYPE | None = None
+        self._unsub_auto_sequence_check: CALLBACK_TYPE | None = None
 
     async def async_setup(self) -> None:
         """Create SDK client, authenticate, subscribe, and fetch initial data."""
@@ -217,6 +242,11 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self._async_update_weather_lookahead,
             WEATHER_LOOKAHEAD_UPDATE_INTERVAL,
         )
+        self._unsub_auto_sequence_check = async_track_time_interval(
+            self.hass,
+            self._async_auto_sequence_check,
+            AUTO_SEQUENCE_CHECK_INTERVAL,
+        )
         self._unsub_weather_state = async_track_state_change_event(
             self.hass,
             [self._weather_entity_id()],
@@ -246,6 +276,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self._unsub_weather_lookahead:
             self._unsub_weather_lookahead()
             self._unsub_weather_lookahead = None
+        if self._unsub_auto_sequence_check:
+            self._unsub_auto_sequence_check()
+            self._unsub_auto_sequence_check = None
         if self._unsub_weather_state:
             self._unsub_weather_state()
             self._unsub_weather_state = None
@@ -385,6 +418,309 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             payload,
         )
         self._mark_plan_started(sn, plan_name, sequence_plan is not None)
+
+    def sequence_auto_ready_status(self, sn: str) -> dict[str, Any]:
+        """Return automation readiness details for the next queued sequence plan."""
+        now = dt_util.now()
+        next_plan = self.next_sequence_plan(sn)
+        best = self.best_mow_start(sn)
+        best_at = self._parse_datetime(best.get("start_at"))
+        wake_lead_minutes = self.auto_wake_lead_minutes.get(
+            sn, AUTO_WAKE_LEAD_MINUTES_DEFAULT
+        )
+        wake_interval_minutes = self.auto_wake_interval_minutes.get(
+            sn, AUTO_WAKE_INTERVAL_MINUTES_DEFAULT
+        )
+        start_grace_minutes = self.auto_start_grace_minutes.get(
+            sn, AUTO_START_GRACE_MINUTES_DEFAULT
+        )
+        min_battery = self.auto_min_battery.get(sn, AUTO_MIN_BATTERY_DEFAULT)
+        min_favorability = self.auto_min_favorability.get(
+            sn, AUTO_MIN_FAVORABILITY_DEFAULT
+        )
+        max_wetness = self.auto_max_wetness.get(sn, AUTO_MAX_WETNESS_DEFAULT)
+
+        wake_window_start = (
+            best_at - timedelta(minutes=wake_lead_minutes) if best_at else None
+        )
+        start_window_end = (
+            best_at + timedelta(minutes=start_grace_minutes) if best_at else None
+        )
+        in_wake_window = bool(
+            best_at
+            and wake_window_start is not None
+            and start_window_end is not None
+            and wake_window_start <= now <= start_window_end
+        )
+        in_start_window = bool(
+            best_at and start_window_end is not None and best_at <= now <= start_window_end
+        )
+
+        checks: list[dict[str, Any]] = []
+        reasons: list[str] = []
+
+        def add_check(name: str, passed: bool, reason: str) -> None:
+            checks.append(
+                {
+                    "name": name,
+                    "passed": passed,
+                    "reason": None if passed else reason,
+                }
+            )
+            if not passed:
+                reasons.append(reason)
+
+        add_check("sequence", bool(next_plan), "no queued sequence plan")
+        add_check(
+            "best_start",
+            best_at is not None and best.get("status") == "ready",
+            best.get("reason") or "best start unavailable",
+        )
+        add_check(
+            "start_window",
+            in_start_window,
+            "outside best-start grace window",
+        )
+
+        weather_clear = (
+            self.weather_lookahead.get("status") == "clear"
+            and not self.weather_lookahead.get("blocked")
+        )
+        add_check(
+            "weather_window",
+            weather_clear,
+            str(self.weather_lookahead.get("reason") or "weather window unknown"),
+        )
+
+        favorability = self._entity_state_float(sn, "sensor", "mowing_conditions")
+        wetness = self._entity_state_float(sn, "sensor", "grass_wetness")
+        add_check(
+            "mowing_favorability",
+            favorability is not None and favorability >= min_favorability,
+            f"favorability below {min_favorability:g}%",
+        )
+        add_check(
+            "grass_wetness",
+            wetness is not None and wetness <= max_wetness,
+            f"wetness above {max_wetness:g}%",
+        )
+
+        data = (self.data or {}).get(sn, {})
+        online = data.get("__online__") is True
+        add_check("online", online, "mower is not online")
+
+        battery = self._field_float(sn, "BatteryMSG.capacity")
+        add_check(
+            "battery",
+            battery is not None and battery >= min_battery,
+            f"battery below {min_battery:g}%",
+        )
+
+        rtk = self._field_int(sn, "RTKMSG.status")
+        add_check("rtk", rtk in RTK_READY, "RTK is not ready")
+
+        head_type = self._field_int(sn, "HeadMsg.head_type")
+        add_check(
+            "mower_head",
+            head_type in MOWER_HEAD_TYPES,
+            "mower head is not attached",
+        )
+
+        charging_status = self._field_int(sn, "BatteryMSG.status")
+        add_check(
+            "charging",
+            charging_status is not None and charging_status <= 1,
+            "mower is charging",
+        )
+
+        wired_charging = self._field_int(sn, "BodyMsg.rechargeState")
+        add_check(
+            "wired_charging",
+            wired_charging not in (1, 3),
+            "mower is wired charging",
+        )
+
+        planning = self._planning_state(sn)
+        add_check(
+            "planning_state",
+            planning is None or planning <= 0 or planning == COMPLETED_PLANNING_STATE,
+            "mower is already running a plan",
+        )
+
+        recharging = self._field_int(sn, "StateMSG.on_going_recharging")
+        add_check(
+            "returning_state",
+            recharging in (None, 0),
+            "mower is returning or charging",
+        )
+
+        error_code = self._field_int(sn, "StateMSG.error_code")
+        add_check(
+            "error_code",
+            error_code in (None, 0),
+            f"mower error code {error_code}",
+        )
+
+        obstacle = self._field_int(sn, "StateMSG.obstacle")
+        add_check("obstacle", obstacle in (None, 0), "obstacle is active")
+
+        stuck = self._field_int(sn, "StateMSG.stuck")
+        add_check("stuck", stuck in (None, 0), "mower is stuck")
+
+        ready = not reasons
+        wake_interval_due = self._minutes_elapsed_since(
+            self._last_auto_wake_at.get(sn),
+            wake_interval_minutes,
+            now,
+        )
+        start_retry_due = self._minutes_elapsed_since(
+            self._last_auto_start_attempt_at.get(sn),
+            AUTO_SEQUENCE_START_RETRY_INTERVAL.total_seconds() / 60,
+            now,
+        )
+        wake_due = bool(
+            self.auto_wake_checks.get(sn, False)
+            and next_plan
+            and in_wake_window
+            and wake_interval_due
+            and not self._mower_active_or_returning(sn)
+        )
+        start_due = bool(
+            self.auto_sequence_start.get(sn, False)
+            and ready
+            and start_retry_due
+        )
+
+        return {
+            "ready": ready,
+            "reason": "ready" if ready else reasons[0],
+            "reasons": reasons,
+            "checks": checks,
+            "auto_wake_enabled": self.auto_wake_checks.get(sn, False),
+            "auto_start_enabled": self.auto_sequence_start.get(sn, False),
+            "wake_due": wake_due,
+            "start_due": start_due,
+            "in_wake_window": in_wake_window,
+            "in_start_window": in_start_window,
+            "wake_interval_due": wake_interval_due,
+            "start_retry_due": start_retry_due,
+            "checked_at": now.isoformat(),
+            "next_sequence_plan": next_plan or UNKNOWN_PLAN,
+            "best_start_at": best_at.isoformat() if best_at else None,
+            "best_start_display": best.get("display"),
+            "best_start_score": best.get("score"),
+            "wake_window_start": wake_window_start.isoformat()
+            if wake_window_start
+            else None,
+            "start_window_end": start_window_end.isoformat()
+            if start_window_end
+            else None,
+            "wake_lead_minutes": wake_lead_minutes,
+            "wake_interval_minutes": wake_interval_minutes,
+            "start_grace_minutes": start_grace_minutes,
+            "minimum_battery_percent": min_battery,
+            "minimum_mowing_favorability": min_favorability,
+            "maximum_grass_wetness": max_wetness,
+            "battery_percent": battery,
+            "mowing_favorability": favorability,
+            "grass_wetness": wetness,
+            "rtk_status": rtk,
+            "head_type": head_type,
+            "planning_state": planning,
+            "recharging_state": recharging,
+            "last_auto_wake_at": self._last_auto_wake_at.get(sn),
+            "last_auto_start_attempt_at": self._last_auto_start_attempt_at.get(sn),
+            "last_auto_error": self._last_auto_error.get(sn),
+        }
+
+    async def _async_auto_sequence_check(self, _now=None) -> None:
+        """Wake and optionally start the sequence near the best mow window."""
+        changed = False
+        for device in self.devices:
+            sn = device.sn
+            status = self.sequence_auto_ready_status(sn)
+            self.auto_sequence_status[sn] = status
+            changed = True
+
+            if status["wake_due"]:
+                await self._async_auto_wake(sn)
+                changed = True
+
+            if status["start_due"]:
+                await self._async_update_weather_lookahead()
+                status = self.sequence_auto_ready_status(sn)
+                self.auto_sequence_status[sn] = status
+                if status["start_due"]:
+                    await self._async_auto_start(sn)
+                    changed = True
+
+        if changed:
+            self.async_set_updated_data(self.data or {})
+
+    async def _async_auto_wake(self, sn: str) -> None:
+        """Wake the mower so final online and RTK checks can settle."""
+        now = dt_util.now()
+        self._last_auto_wake_at[sn] = now.isoformat()
+        try:
+            await self.async_set_working_state(sn, 1)
+            self._last_auto_error[sn] = None
+        except Exception as err:
+            self._last_auto_error[sn] = f"wake failed: {err}"
+            _LOGGER.warning("Automatic Yarbo wake failed for %s: %s", sn, err)
+
+    async def _async_auto_start(self, sn: str) -> None:
+        """Start the next queued sequence plan after all automation checks pass."""
+        now = dt_util.now()
+        self._last_auto_start_attempt_at[sn] = now.isoformat()
+        try:
+            await self.async_start_plan(sn, use_sequence=True)
+            self._last_auto_error[sn] = None
+        except Exception as err:
+            self._last_auto_error[sn] = f"start failed: {err}"
+            _LOGGER.warning("Automatic Yarbo sequence start failed for %s: %s", sn, err)
+
+    def _field_int(self, sn: str, path: str) -> int | None:
+        return _as_int(extract_field((self.data or {}).get(sn, {}), path))
+
+    def _field_float(self, sn: str, path: str) -> float | None:
+        return _as_float(extract_field((self.data or {}).get(sn, {}), path))
+
+    def _entity_state_float(
+        self,
+        sn: str,
+        platform: str,
+        key: str,
+    ) -> float | None:
+        registry = er.async_get(self.hass)
+        entity_id = registry.async_get_entity_id(platform, DOMAIN, f"{sn}_{key}")
+        if entity_id is None:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in UNAVAILABLE_STATES:
+            return None
+        return _as_float(state.state)
+
+    def _minutes_elapsed_since(
+        self,
+        value: str | None,
+        minutes: float,
+        now: datetime,
+    ) -> bool:
+        parsed = self._parse_datetime(value)
+        if parsed is None:
+            return True
+        return now - parsed >= timedelta(minutes=max(0.0, minutes))
+
+    def _mower_active_or_returning(self, sn: str) -> bool:
+        planning = self._planning_state(sn)
+        if planning is not None and planning > 0 and planning != COMPLETED_PLANNING_STATE:
+            return True
+        recharging = self._field_int(sn, "StateMSG.on_going_recharging")
+        return (
+            recharging is not None
+            and recharging > 0
+            and recharging != CHARGING_RECHARGE_STATE
+        )
 
     async def async_core_command(self, sn: str, command: str) -> None:
         """Run a simple core command."""

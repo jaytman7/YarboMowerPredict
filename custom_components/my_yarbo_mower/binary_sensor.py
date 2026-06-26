@@ -43,11 +43,16 @@ async def async_setup_entry(
 ) -> None:
     """Set up binary sensors."""
     coordinator: MyYarboCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
+    entities: list[BinarySensorEntity] = [
         MyYarboBinarySensor(coordinator, device, sensor_def)
         for device in coordinator.devices
         for sensor_def in BINARY_SENSORS
+    ]
+    entities.extend(
+        MyYarboSequenceAutoReadySensor(coordinator, device)
+        for device in coordinator.devices
     )
+    async_add_entities(entities)
 
 
 class MyYarboBinarySensor(MyYarboEntity, BinarySensorEntity):
@@ -81,3 +86,23 @@ class MyYarboBinarySensor(MyYarboEntity, BinarySensorEntity):
             stuck = self.int_field("StateMSG.stuck")
             return None if stuck is None else stuck != 0
         return None
+
+
+class MyYarboSequenceAutoReadySensor(MyYarboEntity, BinarySensorEntity):
+    """Whether the next queued plan is ready for automatic sequence start."""
+
+    _attr_icon = "mdi:playlist-check"
+
+    def __init__(self, coordinator: MyYarboCoordinator, device) -> None:
+        super().__init__(coordinator, device, "sequence_auto_ready")
+        self._attr_name = f"{APP_NAME} Sequence Auto Ready"
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether all automatic start checks currently pass."""
+        return bool(self.coordinator.sequence_auto_ready_status(self._device.sn)["ready"])
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return detailed readiness checks."""
+        return self.coordinator.sequence_auto_ready_status(self._device.sn)
