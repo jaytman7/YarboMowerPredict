@@ -17,7 +17,7 @@ from .entity import MyYarboEntity
 
 @dataclass(frozen=True)
 class AutoSwitchDef:
-    """Automatic sequence switch definition."""
+    """Restored switch definition."""
 
     key: str
     name: str
@@ -38,6 +38,12 @@ AUTO_SWITCHES = [
         "mdi:robot-mower-outline",
         "auto_sequence_start",
     ),
+    AutoSwitchDef(
+        "warm_weather_grass",
+        "Warm Weather Grass",
+        "mdi:sprout",
+        "warm_weather_grass",
+    ),
 ]
 
 
@@ -56,7 +62,7 @@ async def async_setup_entry(
 
 
 class MyYarboAutoSwitch(MyYarboEntity, SwitchEntity, RestoreEntity):
-    """Restored opt-in switch for automatic sequence behavior."""
+    """Restored local behavior switch."""
 
     def __init__(
         self,
@@ -74,8 +80,12 @@ class MyYarboAutoSwitch(MyYarboEntity, SwitchEntity, RestoreEntity):
         """Restore the previous switch value."""
         await super().async_added_to_hass()
         state = await self.async_get_last_state()
-        self._value = state is not None and state.state == "on"
+        if state is None:
+            self._value = bool(self._store().get(self._device.sn, False))
+        else:
+            self._value = state.state == "on"
         self._store()[self._device.sn] = self._value
+        self.coordinator.persist_local_state()
 
     @property
     def is_on(self) -> bool:
@@ -86,6 +96,7 @@ class MyYarboAutoSwitch(MyYarboEntity, SwitchEntity, RestoreEntity):
         """Enable automatic behavior."""
         self._value = True
         self._store()[self._device.sn] = self._value
+        self.coordinator.persist_local_state()
         self.async_write_ha_state()
         self.coordinator.async_set_updated_data(self.coordinator.data or {})
 
@@ -93,6 +104,7 @@ class MyYarboAutoSwitch(MyYarboEntity, SwitchEntity, RestoreEntity):
         """Disable automatic behavior."""
         self._value = False
         self._store()[self._device.sn] = self._value
+        self.coordinator.persist_local_state()
         self.async_write_ha_state()
         self.coordinator.async_set_updated_data(self.coordinator.data or {})
 

@@ -78,6 +78,7 @@ ENTITY_PLACEHOLDERS: dict[str, tuple[str, str]] = {
     "STOP_BUTTON": ("button", "stop"),
     "STUCK_BINARY_SENSOR": ("binary_sensor", "stuck"),
     "WAKE_BUTTON": ("button", "wake"),
+    "WARM_WEATHER_GRASS_SWITCH": ("switch", "warm_weather_grass"),
     "WEATHER_WINDOW_SENSOR": ("sensor", "weather_window"),
 }
 

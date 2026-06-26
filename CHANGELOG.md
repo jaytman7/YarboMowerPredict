@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Adds a Warm Weather Grass switch that changes future grass growth estimates
+  between cold-weather and warm-weather temperature response curves.
+- Shows the active growth model and estimated growth rate on the generated
+  dashboard.
+
 ## 0.1.0
 
 - Initial standalone My Yarbo Mower integration.

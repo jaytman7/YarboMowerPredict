@@ -56,9 +56,26 @@ SEQUENCE_STORE_VERSION = 1
 SEQUENCE_STORE_DELAY = 2
 GROWTH_UPDATE_INTERVAL = timedelta(minutes=30)
 GROWTH_MAX_CATCHUP_HOURS = 24.0
-GROWTH_MAX_DAILY_INCHES = 0.16
-GROWTH_OPTIMAL_TEMP_F = 68.0
-GROWTH_TEMP_SPREAD_F = 18.0
+GROWTH_PROFILES: dict[str, dict[str, Any]] = {
+    "cold_weather": {
+        "label": "Cold weather grass",
+        "model": "cold-weather grass temperature potential",
+        "max_daily_inches": 0.16,
+        "optimal_temp_f": 68.0,
+        "temp_spread_f": 18.0,
+        "minimum_temp_f": 38.0,
+        "maximum_temp_f": 100.0,
+    },
+    "warm_weather": {
+        "label": "Warm weather grass",
+        "model": "warm-weather grass temperature potential",
+        "max_daily_inches": 0.18,
+        "optimal_temp_f": 86.0,
+        "temp_spread_f": 16.0,
+        "minimum_temp_f": 50.0,
+        "maximum_temp_f": 108.0,
+    },
+}
 WEATHER_LOOKAHEAD_HOURS = 3
 WEATHER_LOOKAHEAD_UPDATE_INTERVAL = timedelta(minutes=2)
 WEATHER_LOOKAHEAD_PRECIP_PROBABILITY = 35.0
@@ -133,6 +150,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.auto_start_grace_minutes: dict[str, float] = {}
         self.auto_wake_lead_minutes: dict[str, float] = {}
         self.auto_wake_interval_minutes: dict[str, float] = {}
+        self.warm_weather_grass: dict[str, bool] = {}
         self.plan_sequence: dict[str, list[str]] = {}
         self.sequence_index: dict[str, int] = {}
         self.sequence_picker: dict[str, str | None] = {}
@@ -836,6 +854,12 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 if self._parse_datetime(value) is not None
             }
 
+        warm_weather_grass = stored.get("warm_weather_grass") or {}
+        if isinstance(warm_weather_grass, dict):
+            self.warm_weather_grass = {
+                str(sn): bool(value) for sn, value in warm_weather_grass.items()
+            }
+
     def _sequence_store_data(self) -> dict[str, Any]:
         return {
             "plan_sequence": self.plan_sequence,
@@ -846,12 +870,17 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "plan_growth_started_at": self.plan_growth_started_at,
             "plan_last_mowed_at": self.plan_last_mowed_at,
             "last_growth_update": self._last_growth_update,
+            "warm_weather_grass": self.warm_weather_grass,
         }
 
     def _persist_sequence(self) -> None:
         self._sequence_store.async_delay_save(
             self._sequence_store_data, SEQUENCE_STORE_DELAY
         )
+
+    def persist_local_state(self) -> None:
+        """Persist local sequence and preference state."""
+        self._persist_sequence()
 
     def plan_names(self, sn: str) -> list[str]:
         """Return locally cached Yarbo plan names."""
@@ -1137,11 +1166,11 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def _async_update_plan_growth(self, _now=None) -> None:
         """Accumulate estimated grass growth for each known plan."""
         now = dt_util.now()
-        growth_rate = self._growth_rate_inches_per_day()
         changed = False
 
         for device in self.devices:
             sn = device.sn
+            growth_rate = self._growth_rate_inches_per_day(sn)
             self._ensure_plan_growth_entries(sn, now)
 
             last_update = self._parse_datetime(self._last_growth_update.get(sn))
@@ -1668,20 +1697,30 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
 
-    def growth_weather_metrics(self) -> dict[str, Any]:
+    def growth_weather_metrics(self, sn: str | None = None) -> dict[str, Any]:
         """Return the current grass-growth model inputs and output."""
         metrics = self._growth_weather_inputs()
+        profile = self._growth_profile(sn)
         metrics["growth_rate_inches_per_day"] = self._growth_rate_inches_per_day(
-            metrics
+            sn, metrics
         )
-        metrics["growth_model"] = "cool-season temperature potential"
-        metrics["max_daily_growth_inches"] = GROWTH_MAX_DAILY_INCHES
+        metrics["grass_profile"] = (
+            "warm_weather" if self._warm_weather_grass_enabled(sn) else "cold_weather"
+        )
+        metrics["grass_profile_label"] = profile["label"]
+        metrics["growth_model"] = profile["model"]
+        metrics["max_daily_growth_inches"] = profile["max_daily_inches"]
+        metrics["growth_optimal_temp_f"] = profile["optimal_temp_f"]
+        metrics["growth_temp_spread_f"] = profile["temp_spread_f"]
+        metrics["growth_minimum_temp_f"] = profile["minimum_temp_f"]
+        metrics["growth_maximum_temp_f"] = profile["maximum_temp_f"]
         return metrics
 
     def _growth_rate_inches_per_day(
-        self, metrics: dict[str, Any] | None = None
+        self, sn: str | None = None, metrics: dict[str, Any] | None = None
     ) -> float:
         metrics = metrics or self._growth_weather_inputs()
+        profile = self._growth_profile(sn)
         temp_f = metrics["temperature_f"]
         humidity = metrics["humidity"]
         cloud_coverage = metrics["cloud_coverage"]
@@ -1692,9 +1731,14 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             temp_factor = 0.35
         else:
             temp_factor = math.exp(
-                -0.5 * ((temp_f - GROWTH_OPTIMAL_TEMP_F) / GROWTH_TEMP_SPREAD_F) ** 2
+                -0.5
+                * ((temp_f - profile["optimal_temp_f"]) / profile["temp_spread_f"])
+                ** 2
             )
-            if temp_f < 38 or temp_f > 100:
+            if (
+                temp_f < profile["minimum_temp_f"]
+                or temp_f > profile["maximum_temp_f"]
+            ):
                 temp_factor = 0.0
 
         moisture_factor = 1.0
@@ -1719,13 +1763,21 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         weather_factor = 0.65 if condition in BAD_GROWTH_WEATHER else 1.0
         return round(
-            GROWTH_MAX_DAILY_INCHES
+            profile["max_daily_inches"]
             * temp_factor
             * moisture_factor
             * sunlight_factor
             * weather_factor,
             4,
         )
+
+    def _warm_weather_grass_enabled(self, sn: str | None) -> bool:
+        return bool(sn is not None and self.warm_weather_grass.get(sn, False))
+
+    def _growth_profile(self, sn: str | None) -> dict[str, Any]:
+        if self._warm_weather_grass_enabled(sn):
+            return GROWTH_PROFILES["warm_weather"]
+        return GROWTH_PROFILES["cold_weather"]
 
     def _growth_weather_inputs(self) -> dict[str, Any]:
         weather_entity = self._weather_entity_id()

@@ -166,7 +166,7 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
         next_sequence_plan = self.coordinator.next_sequence_plan(sn)
         selected_plan = self.coordinator.selected_plan_name.get(sn)
         next_plan = self.coordinator.next_run_plan(sn)
-        growth_metrics = self.coordinator.growth_weather_metrics()
+        growth_metrics = self.coordinator.growth_weather_metrics(sn)
         next_detail = (
             self.coordinator.plan_growth_details(sn, [next_plan])[0]
             if next_plan
@@ -186,8 +186,13 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
             "previous_completed_plan": self.coordinator.previous_completed_plan.get(sn)
             or UNKNOWN_PLAN,
             "active_plan": self.coordinator.active_plan_name.get(sn) or UNKNOWN_PLAN,
+            "grass_profile": growth_metrics["grass_profile"],
+            "grass_profile_label": growth_metrics["grass_profile_label"],
             "growth_rate_inches_per_day": growth_metrics["growth_rate_inches_per_day"],
             "growth_model": growth_metrics["growth_model"],
+            "growth_optimal_temp_f": growth_metrics["growth_optimal_temp_f"],
+            "growth_minimum_temp_f": growth_metrics["growth_minimum_temp_f"],
+            "growth_maximum_temp_f": growth_metrics["growth_maximum_temp_f"],
         }
         if next_detail is not None:
             attrs["next_growth_since_last_mow_in"] = next_detail[

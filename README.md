@@ -15,6 +15,7 @@ This project is separate from the existing YarboHA integration.
 - Direct command buttons for start, stop, dock, wake, refresh, and plan refresh.
 - Local plan selector and persistent plan sequence queue.
 - Per-plan grass growth estimates attached to the sequence list.
+- Toggleable cold-weather and warm-weather grass growth models.
 - Sensors for previous completed plan, next run plan, current sequence position, battery, RTK, recharge status, charging power, mower head, rain sensor, and errors.
 - Weather and sun-derived mowing condition and grass wetness scores.
 - Three-hour weather lookahead that blocks starting when bad weather is expected.
@@ -168,7 +169,18 @@ Each known plan gets a local growth counter. The `Plan Sequence` sensor exposes 
 - `growth_started_at`
 - `last_mowed_at`
 
-The app estimates growth from current weather, temperature, cloud cover, humidity, and sun state. When a plan started by this app completes, that plan's growth counter resets to `0.0` and its `last_mowed_at` timestamp is updated.
+The app estimates growth from current weather, temperature, cloud cover,
+humidity, and sun state. The `Warm Weather Grass` switch changes the temperature
+response curve used for future growth accumulation:
+
+- Off: cold-weather/cool-season grass curve, centered around cooler growing
+  temperatures.
+- On: warm-weather grass curve, centered around hotter growing temperatures.
+
+Changing this switch affects future accumulated growth. It does not rewrite
+growth that has already been counted since the last mow. When a plan started by
+this app completes, that plan's growth counter resets to `0.0` and its
+`last_mowed_at` timestamp is updated.
 
 ## Weather Start Gate
 
