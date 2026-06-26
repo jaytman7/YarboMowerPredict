@@ -196,7 +196,7 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
             attrs["next_growth_days"] = next_detail["growth_days"]
             attrs["next_last_mowed_at"] = next_detail["last_mowed_at"]
         if self._key == "next_run_plan":
-            attrs["source"] = "sequence" if next_sequence_plan else "selected_plan"
+            attrs["source"] = "selected_plan" if selected_plan else "sequence"
         return attrs
 
 

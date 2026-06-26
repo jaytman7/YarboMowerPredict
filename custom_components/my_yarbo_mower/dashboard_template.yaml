@@ -123,7 +123,7 @@ views:
             cards:
               - type: button
                 entity: "@@START_PLAN_BUTTON@@"
-                name: Start Plan
+                name: Run Sequence
                 icon: mdi:playlist-play
                 show_state: false
                 tap_action:
@@ -186,7 +186,7 @@ views:
               - entity: "@@PREVIOUS_COMPLETED_PLAN_SENSOR@@"
                 name: Previous completed
               - entity: "@@NEXT_RUN_PLAN_SENSOR@@"
-                name: Next run
+                name: Start button plan
               - entity: "@@SEQUENCE_PLAN_SELECT@@"
                 name: Sequence plan
               - entity: "@@ADD_SEQUENCE_PLAN_BUTTON@@"
@@ -201,7 +201,8 @@ views:
               {% set sequence = state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'plans') or [] %}
               {% set current = state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'sequence_index') | int(0) %}
               **Previous:** {{ states('@@PREVIOUS_COMPLETED_PLAN_SENSOR@@') }}
-              **Next:** {{ states('@@NEXT_RUN_PLAN_SENSOR@@') }}
+              **Start button:** {{ states('@@NEXT_RUN_PLAN_SENSOR@@') }}
+              **Next sequence:** {{ state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'next_sequence_plan') or 'None' }}
 
               {% if sequence | length > 0 %}
               {% for plan in sequence %}

@@ -111,10 +111,7 @@ class MyYarboMower(MyYarboEntity, LawnMowerEntity):
         head_type = self.int_field("HeadMsg.head_type")
         if head_type is not None and head_type not in MOWER_HEAD_TYPES:
             raise HomeAssistantError("Cannot start: mower head is not attached")
-        if (
-            self.coordinator.next_sequence_plan(self._device.sn) is None
-            and self.coordinator.selected_plan.get(self._device.sn) is None
-        ):
+        if self.coordinator.selected_plan.get(self._device.sn) is None:
             raise HomeAssistantError("Cannot start: no plan selected")
         if self.coordinator.weather_start_blocked():
             raise HomeAssistantError(self.coordinator.weather_start_block_reason())

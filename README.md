@@ -60,10 +60,14 @@ The sequence queue is stored by the integration and survives Home Assistant rest
 - `Add Sequence Plan` appends that plan to the queue.
 - `Remove Sequence Plan` removes the selected plan from the queue, using the last matching entry.
 - `Clear Sequence` empties the queue.
-- `Next Run Plan` shows the plan that will run when Start is pressed.
+- `Next Run Plan` shows the plan that will run when the normal `Start` button is pressed.
 - `Previous Completed Plan` updates after Yarbo reports that an app-started plan completed.
+- `Run Sequence` starts the next queued sequence plan and advances the sequence after completion.
 
-When the queue has at least one plan, Start runs the next queued plan. When the queue is empty, Start uses the normal selected plan.
+The normal Home Assistant `Start` command always uses the selected `Plan` in the
+Mission section. A manually selected plan is not overridden just because the
+sequence has queued plans. Use `Run Sequence` when you want the mower to work
+through the queue.
 
 ## Grass Growth Tracking
 

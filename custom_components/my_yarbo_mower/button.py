@@ -26,7 +26,7 @@ class ButtonDef:
 
 
 BUTTONS = [
-    ButtonDef("start", "Start Plan", "mdi:play"),
+    ButtonDef("start", "Run Sequence", "mdi:playlist-play"),
     ButtonDef("pause", "Pause", "mdi:pause"),
     ButtonDef("resume", "Resume", "mdi:play-pause"),
     ButtonDef("stop", "Stop", "mdi:stop"),
@@ -71,7 +71,10 @@ class MyYarboButton(MyYarboEntity, ButtonEntity):
         key = self._button_def.key
         try:
             if key == "start":
-                await self.coordinator.async_start_plan(self._device.sn)
+                await self.coordinator.async_start_plan(
+                    self._device.sn,
+                    use_sequence=True,
+                )
             elif key in ("pause", "resume", "stop", "dock"):
                 await self.coordinator.async_core_command(self._device.sn, key)
             elif key == "wake":

@@ -338,25 +338,28 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             {"state": state, "source": "smart_home"},
         )
 
-    async def async_start_plan(self, sn: str) -> None:
-        """Start the next queued plan, or the selected plan when no queue exists."""
+    async def async_start_plan(self, sn: str, *, use_sequence: bool = False) -> None:
+        """Start the selected plan, or explicitly start the next queued plan."""
         await self._async_update_weather_lookahead()
         if self.weather_start_blocked():
             raise ValueError(self.weather_start_block_reason())
 
         device = self.device_by_sn(sn)
-        sequence_plan = self.next_sequence_plan(sn)
+        sequence_plan = self.next_sequence_plan(sn) if use_sequence else None
+        if use_sequence and sequence_plan is None:
+            raise ValueError("No queued Yarbo sequence plan")
+
         plan_name = sequence_plan or self.selected_plan_name.get(sn)
         plan_id = (
             self.plan_id_by_name(sn, sequence_plan)
-            if sequence_plan is not None
+            if sequence_plan
             else self.selected_plan.get(sn)
         )
         if plan_id is None and device is not None and self._client is not None:
             await self.async_refresh_plans(sn, device.type_id)
             plan_id = (
                 self.plan_id_by_name(sn, sequence_plan)
-                if sequence_plan is not None
+                if sequence_plan
                 else self.selected_plan.get(sn)
             )
         if device is None or self._client is None or plan_id is None:
@@ -561,14 +564,21 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         return sequence[self._sequence_index_for(sn)]
 
     def next_run_plan(self, sn: str) -> str | None:
-        """Return the plan used by the next start command."""
-        return self.next_sequence_plan(sn) or self.selected_plan_name.get(sn)
+        """Return the plan used by the normal Start command."""
+        return self.selected_plan_name.get(sn) or self.next_sequence_plan(sn)
 
-    def sync_selected_plan_to_next(self, sn: str) -> None:
-        """Make the normal HA plan select mirror the next queued plan."""
+    def sync_selected_plan_to_next(self, sn: str, *, force: bool = False) -> None:
+        """Point the HA plan select at the next queued plan when appropriate."""
+        selected_name = self.selected_plan_name.get(sn)
+        if selected_name is not None:
+            selected_id = self.plan_id_by_name(sn, selected_name)
+            if selected_id is not None:
+                self.selected_plan[sn] = selected_id
+                if not force:
+                    return
+
         next_plan = self.next_sequence_plan(sn)
         if next_plan is None:
-            selected_name = self.selected_plan_name.get(sn)
             if selected_name is not None:
                 self.selected_plan[sn] = self.plan_id_by_name(sn, selected_name)
             return
@@ -681,7 +691,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             raise ValueError("No Yarbo plan selected for the sequence")
         self.plan_sequence.setdefault(sn, []).append(plan_name)
         self.sequence_index[sn] = self._sequence_index_for(sn)
-        self.sync_selected_plan_to_next(sn)
+        self.sync_selected_plan_to_next(sn, force=True)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
         return plan_name
@@ -706,7 +716,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         else:
             self.sequence_index[sn] = current_index % len(sequence)
 
-        self.sync_selected_plan_to_next(sn)
+        self.sync_selected_plan_to_next(sn, force=True)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
         return removed
@@ -1294,18 +1304,21 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.previous_completed_plan[sn] = plan_name
         if plan_name != UNKNOWN_PLAN:
             self._reset_plan_growth(sn, plan_name)
-        if self.active_sequence_plan.pop(sn, False):
+        was_sequence_plan = self.active_sequence_plan.pop(sn, False)
+        if was_sequence_plan:
             sequence = self.plan_sequence.get(sn, [])
             if sequence:
                 current_index = self._sequence_index_for(sn)
                 if sequence[current_index] == plan_name:
                     self.sequence_index[sn] = (current_index + 1) % len(sequence)
                 elif plan_name in sequence:
-                    self.sequence_index[sn] = (sequence.index(plan_name) + 1) % len(sequence)
+                    self.sequence_index[sn] = (
+                        sequence.index(plan_name) + 1
+                    ) % len(sequence)
                 else:
                     self.sequence_index[sn] = current_index
 
-        self.sync_selected_plan_to_next(sn)
+        self.sync_selected_plan_to_next(sn, force=was_sequence_plan)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
 
