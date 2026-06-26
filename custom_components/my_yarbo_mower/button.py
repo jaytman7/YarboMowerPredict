@@ -33,6 +33,7 @@ BUTTONS = [
     ButtonDef("dock", "Dock", "mdi:home-import-outline"),
     ButtonDef("wake", "Wake", "mdi:power"),
     ButtonDef("add_sequence_plan", "Add Sequence Plan", "mdi:playlist-plus"),
+    ButtonDef("next_sequence_plan", "Next Sequence Plan", "mdi:skip-next"),
     ButtonDef("remove_sequence_plan", "Remove Sequence Plan", "mdi:playlist-minus"),
     ButtonDef("clear_sequence", "Clear Sequence", "mdi:playlist-remove"),
     ButtonDef("refresh", "Refresh", "mdi:refresh"),
@@ -81,6 +82,8 @@ class MyYarboButton(MyYarboEntity, ButtonEntity):
                 await self.coordinator.async_set_working_state(self._device.sn, 1)
             elif key == "add_sequence_plan":
                 self.coordinator.add_sequence_plan(self._device.sn)
+            elif key == "next_sequence_plan":
+                self.coordinator.advance_sequence_plan(self._device.sn)
             elif key == "remove_sequence_plan":
                 self.coordinator.remove_sequence_plan(self._device.sn)
             elif key == "clear_sequence":

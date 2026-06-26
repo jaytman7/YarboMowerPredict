@@ -59,6 +59,8 @@ The sequence queue is stored by the integration and survives Home Assistant rest
 
 - `Sequence Plan` chooses a plan for queue editing.
 - `Add Sequence Plan` appends that plan to the queue.
+- `Next Sequence Plan` advances the sequence pointer so `Run Sequence` starts
+  from a different queued plan without marking anything complete.
 - `Remove Sequence Plan` removes the selected plan from the queue, using the last matching entry.
 - `Clear Sequence` empties the queue.
 - `Next Run Plan` shows the plan that will run when the normal `Start` button is pressed.

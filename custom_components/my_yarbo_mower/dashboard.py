@@ -55,6 +55,7 @@ ENTITY_PLACEHOLDERS: dict[str, tuple[str, str]] = {
     "MOWER_ENTITY": ("lawn_mower", "mower"),
     "MOWING_CONDITIONS_SENSOR": ("sensor", "mowing_conditions"),
     "NEXT_RUN_PLAN_SENSOR": ("sensor", "next_run_plan"),
+    "NEXT_SEQUENCE_PLAN_BUTTON": ("button", "next_sequence_plan"),
     "OBSTACLE_BINARY_SENSOR": ("binary_sensor", "obstacle"),
     "ONLINE_BINARY_SENSOR": ("binary_sensor", "online"),
     "PAUSE_BUTTON": ("button", "pause"),

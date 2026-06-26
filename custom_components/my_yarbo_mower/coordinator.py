@@ -1057,6 +1057,16 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.async_set_updated_data(self.data or {})
         return removed
 
+    def advance_sequence_plan(self, sn: str) -> str | None:
+        """Advance the sequence pointer to choose a different next plan."""
+        sequence = self.plan_sequence.get(sn, [])
+        if not sequence:
+            return None
+        self.sequence_index[sn] = (self._sequence_index_for(sn) + 1) % len(sequence)
+        self._persist_sequence()
+        self.async_set_updated_data(self.data or {})
+        return sequence[self.sequence_index[sn]]
+
     def clear_sequence(self, sn: str) -> None:
         """Clear the local plan sequence."""
         self.plan_sequence[sn] = []

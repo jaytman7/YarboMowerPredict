@@ -191,6 +191,8 @@ views:
                 name: Sequence plan
               - entity: "@@ADD_SEQUENCE_PLAN_BUTTON@@"
                 name: Add sequence plan
+              - entity: "@@NEXT_SEQUENCE_PLAN_BUTTON@@"
+                name: Next sequence plan
               - entity: "@@REMOVE_SEQUENCE_PLAN_BUTTON@@"
                 name: Remove sequence plan
               - entity: "@@CLEAR_SEQUENCE_BUTTON@@"
