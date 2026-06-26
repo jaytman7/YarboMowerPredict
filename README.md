@@ -1,6 +1,10 @@
 # My Yarbo Mower
 
-Standalone Home Assistant custom integration and dashboard for controlling a Yarbo mower through `yarbo-data-sdk`.
+Standalone Home Assistant custom integration and dashboard for controlling a
+Yarbo mower through `yarbo-data-sdk`. The project attempts to predict the best
+mowing conditions from local sun and weather data, track grass growth and
+wetness by mowing plan, and use that context to automate Yarbo scheduling so the
+lawn is maintained when conditions are most favorable.
 
 This project is separate from the existing YarboHA integration.
 
