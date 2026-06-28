@@ -37,6 +37,7 @@ from .const import (
     AUTO_START_GRACE_MINUTES_DEFAULT,
     AUTO_WAKE_INTERVAL_MINUTES_DEFAULT,
     AUTO_WAKE_LEAD_MINUTES_DEFAULT,
+    CHARGING_FULL_NOISE_BATTERY_PERCENT,
     CHARGING_RECHARGE_STATE,
     CONF_SELECTED_DEVICES,
     DATA_ACCESS_TOKEN,
@@ -545,10 +546,11 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
 
         charging_status = self._field_int(sn, "BatteryMSG.status")
+        charging = self.battery_charging(sn)
         add_check(
             "charging",
-            charging_status is not None and charging_status <= 1,
-            "mower is charging",
+            charging is False,
+            "charging status unavailable" if charging is None else "mower is charging",
         )
 
         wired_charging = self._field_int(sn, "BodyMsg.rechargeState")
@@ -568,8 +570,8 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         recharging = self._field_int(sn, "StateMSG.on_going_recharging")
         add_check(
             "returning_state",
-            recharging in (None, 0),
-            "mower is returning or charging",
+            recharging in (None, 0, CHARGING_RECHARGE_STATE),
+            "mower is returning",
         )
 
         error_code = self._field_int(sn, "StateMSG.error_code")
@@ -640,6 +642,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "minimum_mowing_favorability": min_favorability,
             "maximum_grass_wetness": max_wetness,
             "battery_percent": battery,
+            "battery_status": charging_status,
+            "battery_charging": charging,
+            "charging_full_noise_battery_percent": CHARGING_FULL_NOISE_BATTERY_PERCENT,
             "mowing_favorability": favorability,
             "grass_wetness": wetness,
             "rtk_status": rtk,
@@ -702,6 +707,19 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def _field_float(self, sn: str, path: str) -> float | None:
         return _as_float(extract_field((self.data or {}).get(sn, {}), path))
+
+    def battery_charging(self, sn: str) -> bool | None:
+        """Return filtered battery charging state."""
+        status = self._field_int(sn, "BatteryMSG.status")
+        if status is None:
+            return None
+        if status <= 1:
+            return False
+
+        battery = self._field_float(sn, "BatteryMSG.capacity")
+        if battery is not None and battery >= CHARGING_FULL_NOISE_BATTERY_PERCENT:
+            return False
+        return True
 
     def _entity_state_float(
         self,

@@ -74,8 +74,7 @@ class MyYarboBinarySensor(MyYarboEntity, BinarySensorEntity):
         if key == "online":
             return self.online
         if key == "charging":
-            status = self.int_field("BatteryMSG.status")
-            return None if status is None else status > 1
+            return self.coordinator.battery_charging(self._device.sn)
         if key == "paused":
             paused = self.int_field("StateMSG.planning_paused")
             return None if paused is None else paused != 0

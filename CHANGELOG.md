@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Filters noisy high-battery charging status so 95-100% battery does not keep
+  the mower blocked as charging.
+
 ## 0.1.0
 
 - Initial standalone My Yarbo Mower integration.

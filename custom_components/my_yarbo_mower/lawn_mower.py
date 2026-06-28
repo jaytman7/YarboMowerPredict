@@ -102,8 +102,7 @@ class MyYarboMower(MyYarboEntity, LawnMowerEntity):
 
     @property
     def _is_charging(self) -> bool:
-        status = self.int_field("BatteryMSG.status")
-        return status is not None and status > 1
+        return self.coordinator.battery_charging(self._device.sn) is True
 
     def _check_can_start(self) -> None:
         if not self.online:
