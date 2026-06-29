@@ -2,20 +2,24 @@
 
 ## Unreleased
 
+None.
+
+## 0.1.0
+
 - Adds a dashboard-selectable weather source so mowing decisions can use a
   chosen HA weather provider instead of always using `weather.forecast_home`.
 - Prefers Home Assistant AccuWeather weather entities automatically when
   AccuWeather is configured and no weather source has been selected manually.
 - Reduces scheduled weather lookahead refreshes from every 2 minutes to every
   15 minutes while preserving immediate pre-start weather checks.
+- Fixes automatic sequence starts at the predicted best-start time by keeping
+  the chosen candidate valid through the configured start grace window and
+  across hourly forecast rollovers.
 - Scores best mow starts by day, reports `No candidate` when a day has no safe
   mowing window, and keeps automation focused on today's remaining best start.
 - Adds a Best Start Outlook pane to the generated dashboard.
 - Filters noisy high-battery charging status so 95-100% battery does not keep
   the mower blocked as charging.
-
-## 0.1.0
-
 - Initial standalone My Yarbo Mower integration.
 - Adds Yarbo account config flow, mower controls, plan selection, sequence
   queue, weather gates, grass growth tracking, best-start prediction, and

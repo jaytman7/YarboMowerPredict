@@ -154,6 +154,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.auto_start_grace_minutes: dict[str, float] = {}
         self.auto_wake_lead_minutes: dict[str, float] = {}
         self.auto_wake_interval_minutes: dict[str, float] = {}
+        self._best_mow_start_hold: dict[str, dict[str, Any]] = {}
         self.warm_weather_grass: dict[str, bool] = {}
         self.weather_source: dict[str, str] = {}
         self.plan_sequence: dict[str, list[str]] = {}
@@ -450,9 +451,8 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         wake_interval_minutes = self.auto_wake_interval_minutes.get(
             sn, AUTO_WAKE_INTERVAL_MINUTES_DEFAULT
         )
-        start_grace_minutes = self.auto_start_grace_minutes.get(
-            sn, AUTO_START_GRACE_MINUTES_DEFAULT
-        )
+        start_grace = self._auto_start_grace_delta(sn)
+        start_grace_minutes = start_grace.total_seconds() / 60.0
         min_battery = self.auto_min_battery.get(sn, AUTO_MIN_BATTERY_DEFAULT)
         min_favorability = self.auto_min_favorability.get(
             sn, AUTO_MIN_FAVORABILITY_DEFAULT
@@ -462,9 +462,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         wake_window_start = (
             best_at - timedelta(minutes=wake_lead_minutes) if best_at else None
         )
-        start_window_end = (
-            best_at + timedelta(minutes=start_grace_minutes) if best_at else None
-        )
+        start_window_end = best_at + start_grace if best_at else None
         in_wake_window = bool(
             best_at
             and wake_window_start is not None
@@ -747,6 +745,12 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return True
         return now - parsed >= timedelta(minutes=max(0.0, minutes))
 
+    def _auto_start_grace_delta(self, sn: str) -> timedelta:
+        minutes = self.auto_start_grace_minutes.get(
+            sn, AUTO_START_GRACE_MINUTES_DEFAULT
+        )
+        return timedelta(minutes=max(0.0, minutes))
+
     def _mower_active_or_returning(self, sn: str) -> bool:
         planning = self._planning_state(sn)
         if planning is not None and planning > 0 and planning != COMPLETED_PLANNING_STATE:
@@ -1014,8 +1018,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def best_mow_start(self, sn: str) -> dict[str, Any]:
         """Return the best predicted mow start remaining today."""
-        daily = self.daily_best_mow_starts(sn)
-        today_key = dt_util.now().date().isoformat()
+        now = dt_util.now()
+        daily = self.daily_best_mow_starts(sn, now=now)
+        today_key = now.date().isoformat()
         today = next(
             (item for item in daily if item.get("date") == today_key),
             None,
@@ -1033,7 +1038,116 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         result = dict(today)
         result["daily_best_starts"] = daily
+        if result.get("status") == "ready":
+            self._remember_best_mow_start(sn, result)
+            return result
+
+        held = self._held_best_mow_start(sn, result, daily, now)
+        if held is not None:
+            return held
         return result
+
+    def _remember_best_mow_start(self, sn: str, result: dict[str, Any]) -> None:
+        self._best_mow_start_hold[sn] = {
+            key: value
+            for key, value in result.items()
+            if key != "daily_best_starts"
+        }
+
+    def _held_best_mow_start(
+        self,
+        sn: str,
+        current: dict[str, Any],
+        daily: list[dict[str, Any]],
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        if not self._can_hold_best_mow_start(current):
+            return None
+
+        held = self._best_mow_start_hold.get(sn)
+        if held is None:
+            return None
+
+        start_at = self._parse_datetime(held.get("start_at"))
+        if start_at is None or start_at.date() != now.date():
+            self._best_mow_start_hold.pop(sn, None)
+            return None
+
+        hold_until = start_at + self._auto_start_grace_delta(sn)
+        if now > hold_until:
+            self._best_mow_start_hold.pop(sn, None)
+            return None
+
+        result = dict(held)
+        base_reason = result.get("reason") or "selected best start"
+        result["status"] = "ready"
+        result["reason"] = f"{base_reason}; held through start grace window"
+        result["held_after_forecast_rollover"] = True
+        result["hold_until"] = hold_until.isoformat()
+        result["daily_best_starts"] = self._daily_with_held_best_start(
+            daily, result, now.date().isoformat()
+        )
+        return result
+
+    def _can_hold_best_mow_start(self, current: dict[str, Any]) -> bool:
+        if current.get("status") == "ready":
+            return False
+        if current.get("candidate_count", 0):
+            return False
+        if current.get("rejected_reasons"):
+            return False
+        return current.get("reason") in {
+            "forecast hours are outside the daylight mowing window",
+            "hourly forecast unavailable for this day",
+        }
+
+    def _daily_with_held_best_start(
+        self,
+        daily: list[dict[str, Any]],
+        held: dict[str, Any],
+        today_key: str,
+    ) -> list[dict[str, Any]]:
+        replacement_keys = {
+            "status",
+            "start_at",
+            "display",
+            "score",
+            "reason",
+            "temperature_f",
+            "condition",
+            "precipitation_probability",
+            "precipitation",
+            "wind_speed",
+            "humidity",
+            "dew_point_f",
+            "dew_point_spread_f",
+            "cloud_coverage",
+            "held_after_forecast_rollover",
+            "hold_until",
+        }
+        updated: list[dict[str, Any]] = []
+        replaced = False
+        for item in daily:
+            if item.get("date") == today_key:
+                merged = dict(item)
+                for key in replacement_keys:
+                    if key in held:
+                        merged[key] = held[key]
+                updated.append(merged)
+                replaced = True
+            else:
+                updated.append(item)
+
+        if not replaced:
+            updated.insert(
+                0,
+                {
+                    key: value
+                    for key, value in held.items()
+                    if key != "daily_best_starts"
+                },
+            )
+        return updated
 
     def daily_best_mow_starts(
         self,
@@ -1043,17 +1157,23 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Return best mow start scoring for each available forecast day."""
         now = now or dt_util.now()
         horizon = now + timedelta(hours=BEST_MOW_START_LOOKAHEAD_HOURS)
+        start_grace = self._auto_start_grace_delta(sn)
+        candidate_start = now - start_grace
         sun = self.hass.states.get(SUN_ENTITY)
         sun_attrs = sun.attributes if sun is not None else {}
         sun_state = sun.state if sun is not None else None
-        windows = self._daylight_windows(sn, now, horizon, sun_attrs, sun_state)
-        forecast = self._forecast_window(self.weather_forecast, now, horizon)
+        windows = self._daylight_windows(
+            sn, candidate_start, horizon, sun_attrs, sun_state
+        )
+        forecast = self._forecast_window(self.weather_forecast, candidate_start, horizon)
 
         return [
             self._daily_best_mow_start(
                 sn,
                 now.date() + timedelta(days=offset),
                 now,
+                candidate_start,
+                start_grace,
                 forecast,
                 windows,
             )
@@ -1065,20 +1185,32 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         sn: str,
         day,
         now: datetime,
+        candidate_start: datetime,
+        start_grace: timedelta,
         forecast: list[dict[str, Any]],
         windows: list[tuple[datetime, datetime]],
     ) -> dict[str, Any]:
         day_start = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo)
         day_end = day_start + timedelta(days=1)
         label = self._display_date_label(day, now)
-        day_windows = [
+        candidate_day_windows = [
+            (max(window_start, day_start, candidate_start), min(window_end, day_end))
+            for window_start, window_end in windows
+            if window_end > day_start and window_start < day_end
+        ]
+        candidate_day_windows = [
+            (window_start, window_end)
+            for window_start, window_end in candidate_day_windows
+            if window_end > window_start
+        ]
+        display_day_windows = [
             (max(window_start, day_start, now), min(window_end, day_end))
             for window_start, window_end in windows
             if window_end > day_start and window_start < day_end
         ]
-        day_windows = [
+        display_day_windows = [
             (window_start, window_end)
-            for window_start, window_end in day_windows
+            for window_start, window_end in display_day_windows
             if window_end > window_start
         ]
         daylight_windows = [
@@ -1086,7 +1218,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 "start": window_start.isoformat(),
                 "end": window_end.isoformat(),
             }
-            for window_start, window_end in day_windows
+            for window_start, window_end in display_day_windows
         ]
 
         day_forecast = []
@@ -1098,7 +1230,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             if start is None or start < day_start or start >= day_end:
                 continue
             day_forecast.append(item)
-            if not self._in_windows(start, day_windows):
+            if not self._in_windows(start, candidate_day_windows):
                 outside_window_count += 1
                 continue
 
@@ -1128,6 +1260,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 BEST_MOW_START_MIN_DRYING_HOURS,
             ),
             "minimum_score": BEST_MOW_START_MIN_SCORE,
+            "candidate_grace_minutes": round(start_grace.total_seconds() / 60.0, 1),
             "forecast_count": len(day_forecast),
             "outside_daylight_window_count": outside_window_count,
             "candidate_count": len(candidates),
@@ -1156,7 +1289,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 "cloud_coverage": best["cloud_coverage"],
             }
 
-        if not day_windows:
+        if not candidate_day_windows:
             reason = (
                 "no daylight mowing window remains today"
                 if day == now.date()
