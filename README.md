@@ -210,7 +210,11 @@ this app completes, that plan's growth counter resets to `0.0` and its
 
 ## Weather Start Gate
 
-The app checks Home Assistant's hourly weather forecast for the next three hours. Starting is blocked when the current weather or lookahead window contains rain, storms, snow/hail, measurable precipitation, high precipitation probability, or high wind.
+The app checks Home Assistant's hourly weather forecast for the next three
+hours every 15 minutes, and again immediately before a manual or automatic
+start. Starting is blocked when the current weather or lookahead window contains
+rain, storms, snow/hail, measurable precipitation, high precipitation
+probability, or high wind.
 
 The `Weather Window` sensor exposes the current decision, reason, checked timestamp, forecast horizon, and the forecast entries considered by the gate.
 

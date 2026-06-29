@@ -6,6 +6,8 @@
   chosen HA weather provider instead of always using `weather.forecast_home`.
 - Prefers Home Assistant AccuWeather weather entities automatically when
   AccuWeather is configured and no weather source has been selected manually.
+- Reduces scheduled weather lookahead refreshes from every 2 minutes to every
+  15 minutes while preserving immediate pre-start weather checks.
 - Scores best mow starts by day, reports `No candidate` when a day has no safe
   mowing window, and keeps automation focused on today's remaining best start.
 - Adds a Best Start Outlook pane to the generated dashboard.
