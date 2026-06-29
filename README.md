@@ -18,8 +18,11 @@ This project is separate from the existing YarboHA integration.
 - Toggleable cold-weather and warm-weather grass growth models.
 - Sensors for previous completed plan, next run plan, current sequence position, battery, RTK, recharge status, charging power, mower head, rain sensor, and errors.
 - Weather and sun-derived mowing condition and grass wetness scores.
+- Dashboard-selectable Home Assistant weather source, with AccuWeather preferred
+  automatically when configured and no source has been explicitly selected.
 - Three-hour weather lookahead that blocks starting when bad weather is expected.
-- Best mow start prediction for the driest, coolest usable daylight forecast window.
+- Daily best mow start prediction for the driest, coolest usable daylight
+  forecast window, including `No candidate` when a day is not mowable.
 - Configurable blackout windows after sunrise and before sunset.
 - Optional sequence automation gate with pre-start wake checks, RTK readiness checks, and adjustable thresholds.
 - Generated YAML dashboard at `yarbo_mower_app-dashboard.yaml` using the user's actual Home Assistant entity IDs.
@@ -80,6 +83,26 @@ YarboHA and yarbo-cadence-eq are not required. If the package cannot be
 downloaded, or if PyPI does not have a compatible build for the Home Assistant
 Python version and platform, Home Assistant will fail to load this integration
 and log a requirement installation error.
+
+## Weather Providers and AccuWeather
+
+My Yarbo Mower does not store third-party weather API keys. Add weather
+providers to Home Assistant, then choose the resulting `weather.*` entity from
+the `Weather source` selector on the My Yarbo dashboard.
+
+To use AccuWeather:
+
+1. In Home Assistant, open Settings, Devices and services, Add integration.
+2. Search for `AccuWeather`.
+3. Paste your AccuWeather API key into the AccuWeather setup flow.
+4. Confirm the latitude and longitude. The defaults come from the Home
+   Assistant home location.
+5. After Home Assistant creates the AccuWeather weather entity, open the My
+   Yarbo dashboard and set Conditions, Weather source to that entity.
+
+If no My Yarbo weather source has been explicitly selected, the app prefers an
+available AccuWeather weather entity automatically. If a different source was
+already selected, the dashboard selector wins and must be changed manually.
 
 ## HACS Release Checklist
 
@@ -191,7 +214,13 @@ The app checks Home Assistant's hourly weather forecast for the next three hours
 
 The `Weather Window` sensor exposes the current decision, reason, checked timestamp, forecast horizon, and the forecast entries considered by the gate.
 
-The `Best Mow Start` sensor ranks the next 24 hours of hourly forecast entries that fall inside usable daylight. It uses the later of the configured sunrise blackout or a 5-hour dew-drying window, and it also avoids the configured sunset blackout. It favors dry, cool, sunny, lower-wind forecast slots and exposes the top candidates as attributes.
+The `Best Mow Start` sensor reports the best start remaining today. Its
+attributes include `daily_best_starts`, which lists the best candidate for each
+available forecast day or `No candidate` when the day has no acceptable mowing
+window. It uses the later of the configured sunrise blackout or a 6-hour
+dew-drying window, and it also avoids the configured sunset blackout. It favors
+dry, cool, sunny, lower-wind forecast slots and considers humidity, cloud cover,
+and dew-point spread when the selected weather provider supplies those values.
 
 ## Notes
 

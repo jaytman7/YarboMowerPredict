@@ -90,6 +90,7 @@ BEST_MOW_START_TARGET_TEMP_F = 68.0
 BEST_MOW_START_MIN_DRYING_HOURS = 6.0
 BEST_MOW_START_MIN_SCORE = 55.0
 WEATHER_ENTITY = "weather.forecast_home"
+PREFERRED_WEATHER_PLATFORMS = ("accuweather",)
 SUN_ENTITY = "sun.sun"
 UNAVAILABLE_STATES = {STATE_UNKNOWN, STATE_UNAVAILABLE}
 WET_WEATHER = {"rainy", "pouring", "lightning-rainy", "snowy-rainy", "snowy", "hail"}
@@ -928,7 +929,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         ]
         if WEATHER_ENTITY not in options:
             options.append(WEATHER_ENTITY)
-        return sorted(set(options))
+        return self._sort_weather_entities(options)
 
     def plan_names(self, sn: str) -> list[str]:
         """Return locally cached Yarbo plan names."""
@@ -2075,6 +2076,10 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if selected in self.weather_entity_options():
             return selected
 
+        preferred_weather = self._preferred_weather_entity()
+        if preferred_weather is not None:
+            return preferred_weather
+
         preferred = self.hass.states.get(WEATHER_ENTITY)
         if preferred is not None and preferred.state not in UNAVAILABLE_STATES:
             return WEATHER_ENTITY
@@ -2097,6 +2102,33 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def _weather_entity_id(self, sn: str | None = None) -> str:
         return self.weather_entity_id(sn)
+
+    def _preferred_weather_entity(self) -> str | None:
+        """Return the best available preferred weather provider entity."""
+        for entity_id in self.weather_entity_options():
+            if self._weather_entity_platform(entity_id) not in PREFERRED_WEATHER_PLATFORMS:
+                continue
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state not in UNAVAILABLE_STATES:
+                return entity_id
+        return None
+
+    def _sort_weather_entities(self, entity_ids: list[str]) -> list[str]:
+        """Sort weather entities with preferred providers first."""
+        return sorted(
+            set(entity_ids),
+            key=lambda entity_id: (
+                self._weather_entity_platform(entity_id)
+                not in PREFERRED_WEATHER_PLATFORMS,
+                entity_id != WEATHER_ENTITY,
+                entity_id,
+            ),
+        )
+
+    def _weather_entity_platform(self, entity_id: str) -> str | None:
+        registry = er.async_get(self.hass)
+        entry = registry.async_get(entity_id)
+        return entry.platform if entry is not None else None
 
     def _temperature_f(self, value: Any) -> float | None:
         raw = self._float_value(value)

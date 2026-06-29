@@ -4,6 +4,8 @@
 
 - Adds a dashboard-selectable weather source so mowing decisions can use a
   chosen HA weather provider instead of always using `weather.forecast_home`.
+- Prefers Home Assistant AccuWeather weather entities automatically when
+  AccuWeather is configured and no weather source has been selected manually.
 - Scores best mow starts by day, reports `No candidate` when a day has no safe
   mowing window, and keeps automation focused on today's remaining best start.
 - Adds a Best Start Outlook pane to the generated dashboard.
