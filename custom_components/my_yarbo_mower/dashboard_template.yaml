@@ -91,6 +91,8 @@ views:
                 name: Grass wetness
               - entity: "@@WARM_WEATHER_GRASS_SWITCH@@"
                 name: Warm weather grass
+              - entity: "@@WEATHER_SOURCE_SELECT@@"
+                name: Weather source
               - entity: "@@WEATHER_WINDOW_SENSOR@@"
                 name: Next 3 hours
               - entity: "@@BEST_MOW_START_SENSOR@@"
@@ -101,6 +103,18 @@ views:
                 name: Before sunset blackout
               - entity: "@@CHARGING_POWER_SENSOR@@"
                 name: Charging power
+
+          - type: markdown
+            title: Best Start Outlook
+            content: |
+              {% set days = state_attr('@@BEST_MOW_START_SENSOR@@', 'daily_best_starts') or [] %}
+              {% if days | length == 0 %}
+              **Unknown**
+              {% else %}
+              {% for day in days %}
+              - **{{ day.label }}:** {{ day.display }}{% if day.reason %} · {{ day.reason }}{% endif %}
+              {% endfor %}
+              {% endif %}
 
       - type: vertical-stack
         cards:

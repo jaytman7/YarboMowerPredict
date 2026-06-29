@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, STATE_UNAVAILABLE, STATE_UNKNOWN, UnitOfPower
+from homeassistant.const import PERCENTAGE, UnitOfPower
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
@@ -68,7 +68,6 @@ SENSORS = [
 
 WEATHER_ENTITY = "weather.forecast_home"
 SUN_ENTITY = "sun.sun"
-UNAVAILABLE_STATES = {STATE_UNKNOWN, STATE_UNAVAILABLE}
 WET_WEATHER = {"rainy", "pouring", "lightning-rainy", "snowy-rainy", "snowy", "hail"}
 DAMP_WEATHER = {"fog", "cloudy"}
 BAD_WEATHER = {"lightning", "exceptional", "windy", "windy-variant"}
@@ -269,10 +268,13 @@ class MyYarboConditionSensor(MyYarboEntity, SensorEntity):
     async def async_added_to_hass(self) -> None:
         """Track weather and sun updates directly."""
         await super().async_added_to_hass()
+        weather_entities = [
+            state.entity_id for state in self.hass.states.async_all("weather")
+        ] or [WEATHER_ENTITY]
         self.async_on_remove(
             async_track_state_change_event(
                 self.hass,
-                [self._weather_entity_id(), SUN_ENTITY],
+                sorted(set(weather_entities + [SUN_ENTITY])),
                 self._async_source_changed,
             )
         )
@@ -326,22 +328,7 @@ class MyYarboConditionSensor(MyYarboEntity, SensorEntity):
         self.async_write_ha_state()
 
     def _weather_entity_id(self) -> str:
-        preferred = self.hass.states.get(WEATHER_ENTITY)
-        if preferred is not None and preferred.state not in UNAVAILABLE_STATES:
-            return WEATHER_ENTITY
-        available = [
-            state
-            for state in self.hass.states.async_all("weather")
-            if state.state not in UNAVAILABLE_STATES
-        ]
-        if available:
-            return available[0].entity_id
-        if preferred is not None:
-            return WEATHER_ENTITY
-        weather_states = self.hass.states.async_all("weather")
-        if weather_states:
-            return weather_states[0].entity_id
-        return WEATHER_ENTITY
+        return self.coordinator.weather_entity_id(self._device.sn)
 
     def _metrics(self) -> dict[str, Any]:
         weather_entity = self._weather_entity_id()

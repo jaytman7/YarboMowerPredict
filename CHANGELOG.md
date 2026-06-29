@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Adds a dashboard-selectable weather source so mowing decisions can use a
+  chosen HA weather provider instead of always using `weather.forecast_home`.
+- Scores best mow starts by day, reports `No candidate` when a day has no safe
+  mowing window, and keeps automation focused on today's remaining best start.
+- Adds a Best Start Outlook pane to the generated dashboard.
 - Filters noisy high-battery charging status so 95-100% battery does not keep
   the mower blocked as charging.
 

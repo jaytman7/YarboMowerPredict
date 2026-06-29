@@ -24,6 +24,7 @@ async def async_setup_entry(
         entities.append(MyYarboPlanSelect(coordinator, device))
         entities.append(MyYarboSequencePlanSelect(coordinator, device))
         entities.append(MyYarboPowerSelect(coordinator, device))
+        entities.append(MyYarboWeatherSourceSelect(coordinator, device))
     async_add_entities(entities)
 
 
@@ -122,3 +123,29 @@ class MyYarboPowerSelect(MyYarboEntity, SelectEntity):
         await self.coordinator.async_set_working_state(
             self._device.sn, 1 if option == "working" else 0
         )
+
+
+class MyYarboWeatherSourceSelect(MyYarboEntity, SelectEntity):
+    """Weather entity used for mowing decisions."""
+
+    _attr_icon = "mdi:weather-partly-cloudy"
+
+    def __init__(self, coordinator: MyYarboCoordinator, device) -> None:
+        super().__init__(coordinator, device, "weather_source")
+        self._attr_name = f"{APP_NAME} Weather Source"
+
+    @property
+    def options(self) -> list[str]:
+        """Return available Home Assistant weather entities."""
+        return self.coordinator.weather_entity_options()
+
+    @property
+    def current_option(self) -> str | None:
+        """Return selected weather entity."""
+        current = self.coordinator.weather_entity_id(self._device.sn)
+        return current if current in self.options else None
+
+    async def async_select_option(self, option: str) -> None:
+        """Select the weather entity used by this app."""
+        await self.coordinator.async_set_weather_source(self._device.sn, option)
+        self.async_write_ha_state()
