@@ -32,6 +32,7 @@ ENTITY_PLACEHOLDERS: dict[str, tuple[str, str]] = {
     "AUTO_MAX_WETNESS_NUMBER": ("number", "auto_max_wetness"),
     "AUTO_MIN_BATTERY_NUMBER": ("number", "auto_min_battery"),
     "AUTO_MIN_FAVORABILITY_NUMBER": ("number", "auto_min_favorability"),
+    "AUTO_MIN_GRASS_GROWTH_NUMBER": ("number", "auto_min_grass_growth"),
     "AUTO_SEQUENCE_READY_BINARY_SENSOR": ("binary_sensor", "sequence_auto_ready"),
     "AUTO_SEQUENCE_START_SWITCH": ("switch", "auto_sequence_start"),
     "AUTO_START_GRACE_NUMBER": ("number", "auto_start_grace"),

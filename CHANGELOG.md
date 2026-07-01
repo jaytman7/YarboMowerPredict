@@ -4,6 +4,16 @@
 
 None.
 
+## 0.2.0
+
+- Orders the plan sequence by estimated grass height from tallest to shortest.
+- Resets a plan's estimated growth and moves it to the bottom of the sequence
+  as soon as Home Assistant successfully starts that plan.
+- Adds an automatic sequence minimum grass growth slider, defaulting to 0.5 in,
+  so sequence starts stay idle until an area has grown enough.
+- Adds readable error-code attributes and Home Assistant persistent
+  notifications for nonzero Yarbo error codes.
+
 ## 0.1.0
 
 - Adds a dashboard-selectable weather source so mowing decisions can use a

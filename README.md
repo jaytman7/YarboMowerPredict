@@ -176,6 +176,7 @@ requires:
 - clear three-hour weather window
 - mowing favorability above the configured minimum
 - grass wetness below the configured maximum
+- next sequence plan growth above the configured minimum
 - mower online
 - battery above the configured minimum
 - mower head attached
@@ -183,8 +184,9 @@ requires:
 - no active plan, return-to-charge, charging, obstacle, stuck, or error state
 
 Defaults are conservative: auto wake and auto start are off, minimum battery is
-`70%`, minimum favorability is `70%`, maximum wetness is `45%`, wake lead is
-`45` minutes, wake interval is `10` minutes, and start grace is `30` minutes.
+`70%`, minimum favorability is `70%`, maximum wetness is `45%`, minimum grass
+growth is `0.5 in`, wake lead is `45` minutes, wake interval is `10` minutes,
+and start grace is `30` minutes.
 
 ## Grass Growth Tracking
 
@@ -204,9 +206,24 @@ response curve used for future growth accumulation:
 - On: warm-weather grass curve, centered around hotter growing temperatures.
 
 Changing this switch affects future accumulated growth. It does not rewrite
-growth that has already been counted since the last mow. When a plan started by
-this app completes, that plan's growth counter resets to `0.0` and its
-`last_mowed_at` timestamp is updated.
+growth that has already been counted since the last mow. When Home Assistant
+successfully starts a plan, that plan's growth counter resets to `0.0`, its
+`last_mowed_at` timestamp is updated, and the sequence is re-sorted from
+tallest estimated grass to shortest.
+
+## Error Codes
+
+The `Error Code` sensor keeps the raw Yarbo `StateMSG.error_code` value as its
+state and adds readable attributes:
+
+- `error_description`
+- `error_active`
+
+The integration includes known text for common planning, boundary, docking, and
+recharge failure codes. Unknown codes are still reported as
+`Unknown Yarbo error <code>` so the raw value is never hidden. Nonzero error
+codes create a Home Assistant persistent notification, and the notification is
+dismissed when the error code clears back to `0`.
 
 ## Weather Start Gate
 

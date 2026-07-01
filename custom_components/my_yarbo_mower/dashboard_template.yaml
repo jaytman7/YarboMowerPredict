@@ -261,6 +261,8 @@ views:
                 name: Min favorability
               - entity: "@@AUTO_MAX_WETNESS_NUMBER@@"
                 name: Max wetness
+              - entity: "@@AUTO_MIN_GRASS_GROWTH_NUMBER@@"
+                name: Min grass growth
               - entity: "@@AUTO_WAKE_LEAD_NUMBER@@"
                 name: Wake lead
               - entity: "@@AUTO_WAKE_INTERVAL_NUMBER@@"
@@ -276,6 +278,7 @@ views:
               **Previous:** {{ states('@@PREVIOUS_COMPLETED_PLAN_SENSOR@@') }}
               **Start button:** {{ states('@@NEXT_RUN_PLAN_SENSOR@@') }}
               **Next sequence:** {{ state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'next_sequence_plan') or 'None' }}
+              **Min growth:** {{ state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'minimum_sequence_growth_in') or 0 }} in · {{ state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'sequence_candidate_count') or 0 }} candidates
               **Growth model:** {{ state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'grass_profile_label') or 'Unknown' }} · {{ state_attr('@@PLAN_SEQUENCE_SENSOR@@', 'growth_rate_inches_per_day') or 0 }} in/day
               **Auto:** {{ auto or 'unknown' }}
 

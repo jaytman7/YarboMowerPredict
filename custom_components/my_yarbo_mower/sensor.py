@@ -19,12 +19,14 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     APP_NAME,
+    AUTO_MIN_GRASS_GROWTH_DEFAULT,
     DOMAIN,
     HEAD_TYPE_MAP,
     PLANNING_STATUS_MAP,
     RECHARGING_STATUS_MAP,
     RTK_STATUS_MAP,
     UNKNOWN_PLAN,
+    describe_error_code,
 )
 from .coordinator import MyYarboCoordinator
 from .entity import MyYarboEntity
@@ -123,6 +125,19 @@ class MyYarboSensor(MyYarboEntity, SensorEntity):
             return self._sensor_def.mapper(value)
         return value
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra details for sensors that need readable context."""
+        if self._sensor_def.key != "error_code":
+            return None
+
+        code = self.int_field("StateMSG.error_code")
+        return {
+            "error_code": code,
+            "error_description": describe_error_code(code),
+            "error_active": code not in (None, 0),
+        }
+
 
 class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
     """Local plan sequence status sensor."""
@@ -162,6 +177,14 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
         sn = self._device.sn
         sequence = list(self.coordinator.plan_sequence.get(sn, []))
         sequence_details = self.coordinator.plan_growth_details(sn, sequence)
+        min_growth = self.coordinator.auto_min_grass_growth.get(
+            sn, AUTO_MIN_GRASS_GROWTH_DEFAULT
+        )
+        sequence_candidates = [
+            plan
+            for plan in sequence_details
+            if plan["growth_since_last_mow_in"] >= min_growth
+        ]
         next_sequence_plan = self.coordinator.next_sequence_plan(sn)
         selected_plan = self.coordinator.selected_plan_name.get(sn)
         next_plan = self.coordinator.next_run_plan(sn)
@@ -176,6 +199,9 @@ class MyYarboSequenceSensor(MyYarboEntity, SensorEntity):
             "plan_names": sequence,
             "all_plans": self.coordinator.plan_growth_details(sn),
             "plan_count": len(sequence),
+            "sequence_candidate_count": len(sequence_candidates),
+            "sequence_candidates": sequence_candidates,
+            "minimum_sequence_growth_in": min_growth,
             "sequence_index": self.coordinator.sequence_index.get(sn, 0)
             if sequence
             else None,

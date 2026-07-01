@@ -27,6 +27,7 @@ APP_NAME = "My Yarbo"
 AUTO_MIN_BATTERY_DEFAULT = 70.0
 AUTO_MIN_FAVORABILITY_DEFAULT = 70.0
 AUTO_MAX_WETNESS_DEFAULT = 45.0
+AUTO_MIN_GRASS_GROWTH_DEFAULT = 0.5
 AUTO_START_GRACE_MINUTES_DEFAULT = 30.0
 AUTO_WAKE_LEAD_MINUTES_DEFAULT = 45.0
 AUTO_WAKE_INTERVAL_MINUTES_DEFAULT = 10.0
@@ -39,6 +40,43 @@ RETURNING_STATES = {1, 2, 3, 99}
 CHARGING_RECHARGE_STATE = 4
 COMPLETED_PLANNING_STATE = 5
 UNKNOWN_PLAN = "None"
+
+ERROR_CODE_MAP = {
+    0: "No error",
+    -2: "Operation failed or server error",
+    -3: "Direction uninitialized",
+    -4: "Dock uninitialized",
+    -5: "Recharge failed",
+    -6: "Failed to park",
+    -8: "Docking connection failed",
+    -9: "Stuck",
+    -10: "Plan not found",
+    -11: "Failed to read plan",
+    -12: "Failed to calculate route",
+    -20: "Outside mapped area",
+    -21: "Area data error",
+    -22: "Route data error",
+    -23: "In no-go zone",
+    -24: "Low battery",
+    -26: "Module position failure",
+    -30: "Location data error",
+    -31: "Docking station error",
+    -40: "Obstacle mark failed",
+    -42: "Out of boundary",
+    -43: "Unable to navigate obstacle",
+    -44: "Exceeded boundary",
+    -47: "Out of boundary >1.5m",
+    -88: "In no-go zone",
+    -92: "Out of boundary",
+}
+
+
+def describe_error_code(code: int | None) -> str | None:
+    """Return text for a Yarbo error code without hiding unknown codes."""
+    if code is None:
+        return None
+    return ERROR_CODE_MAP.get(code, f"Unknown Yarbo error {code}")
+
 
 PLANNING_STATUS_MAP = {
     0: "Idle",

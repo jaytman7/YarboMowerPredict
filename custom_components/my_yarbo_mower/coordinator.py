@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
@@ -31,9 +32,11 @@ from yarbo_robot_sdk.device_helpers import extract_field
 
 from .const import (
     ACTIVE_PLANNING_STATES,
+    APP_NAME,
     AUTO_MAX_WETNESS_DEFAULT,
     AUTO_MIN_BATTERY_DEFAULT,
     AUTO_MIN_FAVORABILITY_DEFAULT,
+    AUTO_MIN_GRASS_GROWTH_DEFAULT,
     AUTO_START_GRACE_MINUTES_DEFAULT,
     AUTO_WAKE_INTERVAL_MINUTES_DEFAULT,
     AUTO_WAKE_LEAD_MINUTES_DEFAULT,
@@ -43,6 +46,7 @@ from .const import (
     DATA_ACCESS_TOKEN,
     DATA_REFRESH_TOKEN,
     DOMAIN,
+    describe_error_code,
     COMPLETED_PLANNING_STATE,
     MOWER_HEAD_TYPES,
     RTK_READY,
@@ -151,6 +155,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.auto_min_battery: dict[str, float] = {}
         self.auto_min_favorability: dict[str, float] = {}
         self.auto_max_wetness: dict[str, float] = {}
+        self.auto_min_grass_growth: dict[str, float] = {}
         self.auto_start_grace_minutes: dict[str, float] = {}
         self.auto_wake_lead_minutes: dict[str, float] = {}
         self.auto_wake_interval_minutes: dict[str, float] = {}
@@ -178,6 +183,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._last_auto_wake_at: dict[str, str] = {}
         self._last_auto_start_attempt_at: dict[str, str] = {}
         self._last_auto_error: dict[str, str | None] = {}
+        self._last_error_code: dict[str, int | None] = {}
         self._last_planning_state: dict[str, int | None] = {}
         self._sequence_store = Store(
             hass, SEQUENCE_STORE_VERSION, f"{DOMAIN}_{entry.entry_id}_sequence"
@@ -345,6 +351,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.data.setdefault(sn, {})
             _deep_merge(self.data[sn], msg_data)
             self._track_plan_transition(sn)
+            self._track_error_code(sn)
             self.async_set_updated_data(self.data)
         except TimeoutError:
             _LOGGER.warning("DeviceMSG request timed out for %s", sn)
@@ -366,6 +373,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.plan_data[sn] = result.get("data", {}).get("data", [])
             self._ensure_sequence_picker(sn)
             self._ensure_plan_growth_entries(sn)
+            self._sort_sequence_by_growth(sn)
             self.sync_selected_plan_to_next(sn)
             self._persist_sequence()
             self.async_set_updated_data(self.data)
@@ -401,6 +409,16 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         sequence_plan = self.next_sequence_plan(sn) if use_sequence else None
         if use_sequence and sequence_plan is None:
             raise ValueError("No queued Yarbo sequence plan")
+        if use_sequence:
+            growth = self._plan_growth_value(sn, sequence_plan)
+            min_growth = self.auto_min_grass_growth.get(
+                sn, AUTO_MIN_GRASS_GROWTH_DEFAULT
+            )
+            if growth < min_growth:
+                raise ValueError(
+                    f"Cannot start: {sequence_plan} growth is {growth:.2f} in, "
+                    f"below {min_growth:g} in"
+                )
 
         plan_name = sequence_plan or self.selected_plan_name.get(sn)
         plan_id = (
@@ -458,6 +476,11 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             sn, AUTO_MIN_FAVORABILITY_DEFAULT
         )
         max_wetness = self.auto_max_wetness.get(sn, AUTO_MAX_WETNESS_DEFAULT)
+        min_growth = self.auto_min_grass_growth.get(
+            sn, AUTO_MIN_GRASS_GROWTH_DEFAULT
+        )
+        next_growth = self._plan_growth_value(sn, next_plan)
+        growth_candidate = bool(next_plan and next_growth >= min_growth)
 
         wake_window_start = (
             best_at - timedelta(minutes=wake_lead_minutes) if best_at else None
@@ -488,6 +511,11 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 reasons.append(reason)
 
         add_check("sequence", bool(next_plan), "no queued sequence plan")
+        add_check(
+            "minimum_growth",
+            not next_plan or growth_candidate,
+            f"next sequence growth {next_growth:.2f} in below {min_growth:g} in",
+        )
         add_check(
             "best_start",
             best_at is not None and best.get("status") == "ready",
@@ -573,10 +601,11 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
 
         error_code = self._field_int(sn, "StateMSG.error_code")
+        error_description = describe_error_code(error_code)
         add_check(
             "error_code",
             error_code in (None, 0),
-            f"mower error code {error_code}",
+            f"mower error code {error_code}: {error_description}",
         )
 
         obstacle = self._field_int(sn, "StateMSG.obstacle")
@@ -599,6 +628,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         wake_due = bool(
             self.auto_wake_checks.get(sn, False)
             and next_plan
+            and growth_candidate
             and in_wake_window
             and wake_interval_due
             and not self._mower_active_or_returning(sn)
@@ -637,6 +667,9 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "wake_interval_minutes": wake_interval_minutes,
             "start_grace_minutes": start_grace_minutes,
             "minimum_battery_percent": min_battery,
+            "minimum_grass_growth_inches": min_growth,
+            "next_sequence_growth_inches": next_growth if next_plan else None,
+            "sequence_growth_candidate": growth_candidate,
             "minimum_mowing_favorability": min_favorability,
             "maximum_grass_wetness": max_wetness,
             "battery_percent": battery,
@@ -649,6 +682,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "head_type": head_type,
             "planning_state": planning,
             "recharging_state": recharging,
+            "error_description": error_description,
             "last_auto_wake_at": self._last_auto_wake_at.get(sn),
             "last_auto_start_attempt_at": self._last_auto_start_attempt_at.get(sn),
             "last_auto_error": self._last_auto_error.get(sn),
@@ -1345,7 +1379,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if plan_name is None:
             raise ValueError("No Yarbo plan selected for the sequence")
         self.plan_sequence.setdefault(sn, []).append(plan_name)
-        self.sequence_index[sn] = self._sequence_index_for(sn)
+        self._sort_sequence_by_growth(sn)
         self.sync_selected_plan_to_next(sn, force=True)
         self._persist_sequence()
         self.async_set_updated_data(self.data or {})
@@ -1424,6 +1458,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.data.setdefault(sn, {})
         if _deep_merge(self.data[sn], data):
             self._track_plan_transition(sn)
+            self._track_error_code(sn)
             self.hass.loop.call_soon_threadsafe(self.async_set_updated_data, self.data)
 
     def _on_heart_beat(self, topic: str, data: dict[str, Any]) -> None:
@@ -1485,6 +1520,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     max(0.0, plan_growth.get(plan_name, 0.0) + increment), 3
                 )
                 changed = True
+            self._sort_sequence_by_growth(sn)
 
         if changed:
             self._persist_sequence()
@@ -2023,6 +2059,43 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.plan_growth_started_at.setdefault(sn, {})[plan_name] = now_iso
         self.plan_last_mowed_at.setdefault(sn, {})[plan_name] = now_iso
 
+    def _plan_growth_value(self, sn: str, plan_name: str | None) -> float:
+        if plan_name is None:
+            return 0.0
+        return max(0.0, self.plan_growth_inches.get(sn, {}).get(plan_name, 0.0))
+
+    def _sort_sequence_by_growth(
+        self,
+        sn: str,
+        *,
+        demote_plan: str | None = None,
+    ) -> bool:
+        sequence = self.plan_sequence.get(sn, [])
+        if not sequence:
+            self.sequence_index[sn] = 0
+            return False
+
+        current_index = self._sequence_index_for(sn)
+        old_sequence = list(sequence)
+
+        growth = self.plan_growth_inches.setdefault(sn, {})
+        sorted_sequence = [
+            plan_name
+            for original_index, plan_name in sorted(
+                enumerate(old_sequence),
+                key=lambda item: (
+                    -growth.get(item[1], 0.0),
+                    item[1] == demote_plan,
+                    item[0],
+                ),
+            )
+        ]
+
+        self.plan_sequence[sn] = sorted_sequence
+        self.sequence_index[sn] = 0
+
+        return sorted_sequence != old_sequence or current_index != 0
+
     def _plan_growth_detail(
         self, sn: str, plan_name: str, position: int | None = None
     ) -> dict[str, Any]:
@@ -2067,12 +2140,49 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return
         self.hass.loop.call_soon_threadsafe(self._mark_plan_completed, sn)
 
+    def _track_error_code(self, sn: str) -> None:
+        error_code = self._field_int(sn, "StateMSG.error_code")
+        previous = self._last_error_code.get(sn)
+        if error_code == previous:
+            return
+
+        self._last_error_code[sn] = error_code
+        self.hass.loop.call_soon_threadsafe(
+            self._update_error_notification,
+            sn,
+            error_code,
+        )
+
+    def _update_error_notification(self, sn: str, error_code: int | None) -> None:
+        notification_id = f"{DOMAIN}_{sn}_error_code"
+        if error_code in (None, 0):
+            persistent_notification.async_dismiss(self.hass, notification_id)
+            return
+
+        description = describe_error_code(error_code) or f"Unknown Yarbo error {error_code}"
+        device = self.device_by_sn(sn)
+        device_name = getattr(device, "name", None) or getattr(device, "sn", sn)
+        persistent_notification.async_create(
+            self.hass,
+            (
+                f"{device_name} reported error code {error_code}: {description}.\n\n"
+                "Check the mower and Yarbo app before starting or resuming mowing."
+            ),
+            title=f"{APP_NAME} error {error_code}",
+            notification_id=notification_id,
+        )
+
     def _mark_plan_started(
         self, sn: str, plan_name: str | None, sequence_start: bool
     ) -> None:
         self.active_plan_name[sn] = plan_name or UNKNOWN_PLAN
         self.active_sequence_plan[sn] = sequence_start
         self._last_planning_state[sn] = self._planning_state(sn)
+        if plan_name and plan_name != UNKNOWN_PLAN:
+            self._reset_plan_growth(sn, plan_name)
+            self._sort_sequence_by_growth(sn, demote_plan=plan_name)
+            self.sync_selected_plan_to_next(sn, force=True)
+            self._persist_sequence()
         self.async_set_updated_data(self.data or {})
 
     def _mark_plan_completed(self, sn: str) -> None:
@@ -2081,21 +2191,7 @@ class MyYarboCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return
 
         self.previous_completed_plan[sn] = plan_name
-        if plan_name != UNKNOWN_PLAN:
-            self._reset_plan_growth(sn, plan_name)
         was_sequence_plan = self.active_sequence_plan.pop(sn, False)
-        if was_sequence_plan:
-            sequence = self.plan_sequence.get(sn, [])
-            if sequence:
-                current_index = self._sequence_index_for(sn)
-                if sequence[current_index] == plan_name:
-                    self.sequence_index[sn] = (current_index + 1) % len(sequence)
-                elif plan_name in sequence:
-                    self.sequence_index[sn] = (
-                        sequence.index(plan_name) + 1
-                    ) % len(sequence)
-                else:
-                    self.sequence_index[sn] = current_index
 
         self.sync_selected_plan_to_next(sn, force=was_sequence_plan)
         self._persist_sequence()
